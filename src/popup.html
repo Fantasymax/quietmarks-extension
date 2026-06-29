@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>QuietMarks</title>
+    <link rel="stylesheet" href="ui.css">
+  </head>
+  <body class="popup-surface">
+    <main class="shell compact">
+      <section class="mast">
+        <div>
+          <p class="eyebrow">Private bookmark sync</p>
+          <h1>QuietMarks</h1>
+        </div>
+        <div id="syncModePill" class="mode-pill off">
+          <span class="mode-dot"></span>
+          <strong id="syncModeLabel">Manual mode</strong>
+        </div>
+      </section>
+
+      <section class="status-panel">
+        <div class="status-row">
+          <span id="statusDot" class="dot idle"></span>
+          <strong id="statusText">Loading</strong>
+        </div>
+        <p id="statusMeta">Reading local settings...</p>
+      </section>
+
+      <form id="settingsForm" class="form-grid">
+        <label>
+          <span>WebDAV root URL</span>
+          <input id="webdavUrl" type="url" placeholder="https://dav.jianguoyun.com/dav" autocomplete="off">
+          <small>Use the provider root. Put the folder/file path below.</small>
+        </label>
+
+        <label>
+          <span>Sync file path</span>
+          <input id="remoteFile" type="text" placeholder="QuietMarks/state.json" autocomplete="off">
+          <small>This is the WebDAV path where QuietMarks stores sync data.</small>
+        </label>
+
+        <div class="two">
+          <label>
+            <span>Username</span>
+            <input id="username" type="text" autocomplete="username">
+          </label>
+          <label>
+            <span>App password</span>
+            <input id="password" type="password" autocomplete="current-password">
+          </label>
+        </div>
+
+        <label>
+          <span>Encryption passphrase</span>
+          <input id="passphrase" type="password" placeholder="Optional but recommended" autocomplete="off">
+        </label>
+
+        <div class="two">
+          <label>
+            <span>Bookmark location</span>
+            <select id="scope">
+              <option value="all">Use native bookmark bar/menu</option>
+              <option value="folder">Use a dedicated folder</option>
+            </select>
+            <small>Native mode imports into your normal bookmark hierarchy.</small>
+          </label>
+          <label>
+            <span>Auto sync interval (minutes)</span>
+            <input id="intervalMinutes" type="number" min="2" max="120" step="1">
+          </label>
+        </div>
+
+        <label>
+          <span>Dedicated folder name</span>
+          <input id="folderName" type="text" placeholder="QuietMarks">
+        </label>
+
+        <label>
+          <span>Conflict handling</span>
+          <select id="conflictPolicy">
+            <option value="merge">Auto merge safely</option>
+            <option value="local">Prefer this browser</option>
+            <option value="remote">Prefer WebDAV cloud</option>
+          </select>
+        </label>
+
+        <div class="actions">
+          <button id="saveBtn" class="button secondary" type="submit">Save</button>
+          <button id="testWebdavBtn" class="button secondary" type="button">Test WebDAV</button>
+          <button id="syncBtn" class="button primary" type="button">Sync now</button>
+        </div>
+
+        <section class="sync-control">
+          <div>
+            <strong>Auto sync</strong>
+            <span id="autoSyncHint">Off. Use Sync now for manual sync.</span>
+          </div>
+          <label class="switch" title="Automatically sync bookmark changes in the background">
+            <input id="enabled" type="checkbox">
+            <span></span>
+          </label>
+        </section>
+
+        <p id="actionMessage" class="action-message"></p>
+      </form>
+
+      <footer class="foot">
+        <button id="openOptions" type="button">Open full settings</button>
+      </footer>
+      <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    </main>
+    <script src="popup.js"></script>
+  </body>
+</html>

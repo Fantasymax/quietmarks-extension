@@ -1,0 +1,336 @@
+/* global chrome, browser */
+(function () {
+  "use strict";
+
+  const api = typeof browser !== "undefined" ? browser : chrome;
+  const fields = [
+    "enabled",
+    "webdavUrl",
+    "username",
+    "password",
+    "passphrase",
+    "remoteFile",
+    "scope",
+    "folderName",
+    "intervalMinutes",
+    "conflictPolicy"
+  ];
+
+  const element = (id) => document.getElementById(id);
+  let toastTimer = null;
+  let savedButtonLabel = "Save";
+  let syncButtonLabel = "Sync now";
+  let testWebdavButtonLabel = "Test WebDAV";
+
+  function send(type, payload) {
+    return new Promise((resolve, reject) => {
+      try {
+        const message = {
+          type,
+          ...(payload || {})
+        };
+        const result = api.runtime.sendMessage(message, (response) => {
+          const lastError = api.runtime.lastError;
+          if (lastError) {
+            reject(new Error(lastError.message));
+            return;
+          }
+          resolve(response);
+        });
+        if (result && typeof result.then === "function") {
+          result.then(resolve, reject);
+        }
+      } catch (error) {
+        reject(error);
+      }
+    });
+  }
+
+  function setStatus(status, error) {
+    const statusText = element("statusText");
+    const statusMeta = element("statusMeta");
+    const dot = element("statusDot");
+    if (!statusText || !statusMeta || !dot) return;
+
+    statusText.textContent = status || "Not configured";
+    statusMeta.textContent = error || "Ready when your bookmarks change.";
+    dot.className = "dot";
+
+    if (status === "Synced") dot.classList.add("ok");
+    else if (status === "Error") dot.classList.add("bad");
+    else if (status === "Syncing") dot.classList.add("busy");
+    else dot.classList.add("idle");
+  }
+
+  function showToast(message, tone) {
+    const toast = element("toast");
+    if (!toast) return;
+    toast.textContent = message;
+    toast.className = `toast show ${tone || ""}`.trim();
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => {
+      toast.className = "toast";
+    }, 2600);
+  }
+
+  function updateAutoSyncHint(enabled) {
+    const hint = element("autoSyncHint");
+    const modePill = element("syncModePill");
+    const modeLabel = element("syncModeLabel");
+    document.body.classList.toggle("sync-enabled", Boolean(enabled));
+    document.body.classList.toggle("sync-disabled", !enabled);
+    if (hint) {
+      hint.textContent = enabled
+        ? "On. Bookmark changes sync in the background."
+        : "Off. Use Sync now for manual sync.";
+    }
+    if (modePill) {
+      modePill.className = enabled ? "mode-pill on" : "mode-pill off";
+    }
+    if (modeLabel) {
+      modeLabel.textContent = enabled ? "Auto sync on" : "Manual mode";
+    }
+  }
+
+  function setActionMessage(message, tone) {
+    const actionMessage = element("actionMessage");
+    if (!actionMessage) return;
+    actionMessage.textContent = message || "";
+    actionMessage.className = `action-message ${tone || ""}`.trim();
+  }
+
+  function friendlyError(message) {
+    if (!message) return "Sync failed";
+    if (message === "Failed to fetch") {
+      return "Cannot reach the WebDAV server. Check the URL, network, and app password.";
+    }
+    if (message === "WebDAV PUT failed 404") {
+      return "WebDAV target folder was not found. Use an existing WebDAV folder or set State file to QuietMarks/state.json.";
+    }
+    return message;
+  }
+
+  function friendlyWebDavError(message) {
+    const readable = friendlyError(message);
+    if (/Sync file path must include a file name/.test(readable)) {
+      return "Sync file path must be a file, for example QuietMarks/state.json. Do not enter only QuietMarks.";
+    }
+    if (/WebDAV cannot create folder/.test(readable)) {
+      return readable.replace("Create it manually or choose an existing WebDAV folder.", "The folder was not writable for folder creation. Since you already created it, press Test WebDAV again after saving the exact path QuietMarks/state.json.");
+    }
+    return readable;
+  }
+
+  function setButtonState(button, label, state) {
+    if (!button) return;
+    button.textContent = label;
+    button.dataset.state = state || "idle";
+    button.disabled = state === "busy";
+  }
+
+  function setPanelStatus(status) {
+    document.body.classList.toggle("sync-error", status === "Error");
+    document.body.classList.toggle("sync-busy", status === "Syncing");
+    document.body.classList.toggle("sync-ok", status === "Synced");
+  }
+
+  function readForm() {
+    const config = {};
+    fields.forEach((field) => {
+      const input = element(field);
+      if (!input) return;
+      if (input.type === "checkbox") config[field] = input.checked;
+      else if (input.type === "number") config[field] = Number(input.value || 0);
+      else config[field] = input.value.trim();
+    });
+    return config;
+  }
+
+  function writeForm(config) {
+    fields.forEach((field) => {
+      const input = element(field);
+      if (!input) return;
+      const value = config[field];
+      if (input.type === "checkbox") input.checked = Boolean(value);
+      else input.value = value == null ? "" : value;
+    });
+    updateAutoSyncHint(Boolean(config.enabled));
+  }
+
+  function writeStats(config, baseNodeCount) {
+    const stats = config.lastStats || {};
+    const lastStats = element("lastStats");
+    const base = element("baseNodeCount");
+    const device = element("deviceName");
+    const meta = element("statusMeta");
+
+    if (base) base.textContent = `${baseNodeCount || 0} nodes`;
+    if (device) device.textContent = config.deviceName || "This browser";
+    if (lastStats) {
+      lastStats.textContent = `${stats.mergedNodes || 0} merged, ${stats.conflicts || 0} conflicts`;
+    }
+    if (meta && config.lastSyncAt && !config.lastSyncError) {
+      meta.textContent = `Last sync ${new Date(config.lastSyncAt).toLocaleString()}`;
+    }
+  }
+
+  async function refresh() {
+    const response = await send("quietmarks:get");
+    if (!response || !response.config) return;
+    writeForm(response.config);
+    setStatus(response.config.lastSyncStatus, response.config.lastSyncError);
+    setPanelStatus(response.config.lastSyncStatus);
+    writeStats(response.config, response.baseNodeCount);
+    if (response.config.lastSyncError) {
+      setActionMessage(friendlyError(response.config.lastSyncError), "bad");
+    }
+  }
+
+  async function save(toastMessage, options) {
+    const opts = options || {};
+    const saveBtn = element("saveBtn");
+    if (!opts.silent) {
+      setButtonState(saveBtn, "Saving...", "busy");
+      setActionMessage("Saving settings...", "");
+    }
+    const response = await send("quietmarks:save", {
+      config: readForm()
+    });
+    if (!response || response.ok === false) {
+      if (!opts.silent) setButtonState(saveBtn, "Save failed", "bad");
+      setActionMessage(friendlyError(response && response.error ? response.error : "Save failed"), "bad");
+      throw new Error(response && response.error ? response.error : "Save failed");
+    }
+    if (!opts.keepStatus) {
+      setStatus(response.config.lastSyncStatus, response.config.lastSyncError);
+      setPanelStatus(response.config.lastSyncStatus);
+    }
+    writeForm(response.config);
+    if (!opts.silent) {
+      setButtonState(saveBtn, "Saved", "ok");
+      setActionMessage("Settings saved.", "ok");
+      setTimeout(() => setButtonState(saveBtn, savedButtonLabel, "idle"), 1400);
+    }
+    if (toastMessage) showToast(toastMessage, "ok");
+    return response.config;
+  }
+
+  async function syncNow() {
+    const syncBtn = element("syncBtn");
+    setStatus("Syncing", "Merging local and remote bookmark trees...");
+    setPanelStatus("Syncing");
+    setButtonState(syncBtn, "Syncing...", "busy");
+    setActionMessage("Merging local and WebDAV bookmark trees...", "");
+    await save("", {
+      silent: true,
+      keepStatus: true
+    });
+    const response = await send("quietmarks:sync-now");
+    if (!response || response.ok === false) {
+      const error = response && response.error ? response.error : "Sync failed";
+      const readableError = friendlyError(error);
+      setStatus("Error", readableError);
+      setPanelStatus("Error");
+      setButtonState(syncBtn, "Retry sync", "bad");
+      setActionMessage(readableError, "bad");
+      showToast("Sync failed", "bad");
+      return;
+    }
+    setButtonState(syncBtn, "Synced", "ok");
+    setActionMessage("Bookmarks synced successfully.", "ok");
+    showToast("Sync complete", "ok");
+    await refresh();
+    setTimeout(() => setButtonState(syncBtn, syncButtonLabel, "idle"), 1400);
+  }
+
+  async function testWebDav() {
+    const testBtn = element("testWebdavBtn");
+    setButtonState(testBtn, "Testing...", "busy");
+    setActionMessage("Checking WebDAV folder and write permission...", "");
+
+    const response = await send("quietmarks:test-webdav", {
+      config: readForm()
+    });
+
+    if (!response || response.ok === false) {
+      const error = friendlyWebDavError(response && response.error ? response.error : "WebDAV test failed");
+      setButtonState(testBtn, "Test failed", "bad");
+      setActionMessage(error, "bad");
+      showToast("WebDAV test failed", "bad");
+      setTimeout(() => setButtonState(testBtn, testWebdavButtonLabel, "idle"), 2200);
+      return;
+    }
+
+    setButtonState(testBtn, "Writable", "ok");
+    setActionMessage(response.message || "WebDAV is writable.", "ok");
+    showToast("WebDAV is writable", "ok");
+    setTimeout(() => setButtonState(testBtn, testWebdavButtonLabel, "idle"), 1800);
+  }
+
+  document.addEventListener("DOMContentLoaded", () => {
+    const form = element("settingsForm");
+    const syncBtn = element("syncBtn");
+    const openOptions = element("openOptions");
+    const resetBase = element("resetBase");
+    const enabled = element("enabled");
+    const saveBtn = element("saveBtn");
+    const testWebdavBtn = element("testWebdavBtn");
+
+    if (saveBtn) savedButtonLabel = saveBtn.textContent;
+    if (syncBtn) syncButtonLabel = syncBtn.textContent;
+    if (testWebdavBtn) testWebdavButtonLabel = testWebdavBtn.textContent;
+
+    refresh().catch((error) => setStatus("Error", error.message));
+
+    if (form) {
+      form.addEventListener("submit", (event) => {
+        event.preventDefault();
+        save("Settings saved")
+          .then(refresh)
+          .catch((error) => setStatus("Error", error.message));
+      });
+    }
+
+    if (enabled) {
+      enabled.addEventListener("change", () => {
+        updateAutoSyncHint(enabled.checked);
+        save()
+          .then(() => {
+            const message = enabled.checked ? "Auto sync enabled." : "Auto sync disabled. Manual sync only.";
+            setActionMessage(message, enabled.checked ? "ok" : "");
+            showToast(enabled.checked ? "Auto sync enabled" : "Auto sync disabled", enabled.checked ? "ok" : "");
+          })
+          .catch((error) => setStatus("Error", error.message));
+      });
+    }
+
+    if (syncBtn) {
+      syncBtn.addEventListener("click", () => {
+        syncNow().catch((error) => setStatus("Error", error.message));
+      });
+    }
+
+    if (testWebdavBtn) {
+      testWebdavBtn.addEventListener("click", () => {
+        testWebDav().catch((error) => {
+          setButtonState(testWebdavBtn, "Test failed", "bad");
+          setActionMessage(friendlyWebDavError(error.message), "bad");
+          setStatus("Error", friendlyWebDavError(error.message));
+          setTimeout(() => setButtonState(testWebdavBtn, testWebdavButtonLabel, "idle"), 2200);
+        });
+      });
+    }
+
+    if (openOptions && api.runtime.openOptionsPage) {
+      openOptions.addEventListener("click", () => api.runtime.openOptionsPage());
+    }
+
+    if (resetBase) {
+      resetBase.addEventListener("click", () => {
+        send("quietmarks:reset-local-base")
+          .then(refresh)
+          .catch((error) => setStatus("Error", error.message));
+      });
+    }
+  });
+})();

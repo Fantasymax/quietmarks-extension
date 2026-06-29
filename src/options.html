@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>QuietMarks Settings</title>
+    <link rel="stylesheet" href="ui.css">
+  </head>
+  <body class="options-surface">
+    <main class="shell wide">
+      <section class="mast hero">
+        <div>
+          <p class="eyebrow">Own your sync layer</p>
+          <h1>QuietMarks</h1>
+          <p class="lead">A minimal WebDAV bookmark sync engine with encrypted remote state and automatic merge.</p>
+        </div>
+        <div id="syncModePill" class="mode-pill off">
+          <span class="mode-dot"></span>
+          <strong id="syncModeLabel">Manual mode</strong>
+        </div>
+      </section>
+
+      <section class="grid-page">
+        <form id="settingsForm" class="form-grid panel">
+          <label>
+            <span>WebDAV root URL</span>
+            <input id="webdavUrl" type="url" placeholder="https://dav.jianguoyun.com/dav" autocomplete="off">
+            <small>Use the provider root URL. Put the QuietMarks folder/file path in `Sync file path`.</small>
+          </label>
+
+          <div class="two">
+            <label>
+              <span>Username</span>
+              <input id="username" type="text" autocomplete="username">
+            </label>
+            <label>
+              <span>App password</span>
+              <input id="password" type="password" autocomplete="current-password">
+            </label>
+          </div>
+
+          <label>
+            <span>Encryption passphrase</span>
+            <input id="passphrase" type="password" placeholder="Same passphrase on every browser" autocomplete="off">
+          </label>
+
+          <div class="two">
+            <label>
+              <span>Sync file path</span>
+              <input id="remoteFile" type="text" placeholder="QuietMarks/state.json">
+              <small>Default: QuietMarks/state.json. The format is QuietMarks JSON; with a passphrase, the payload is AES-GCM encrypted.</small>
+            </label>
+            <label>
+              <span>Auto sync interval (minutes)</span>
+              <input id="intervalMinutes" type="number" min="2" max="120" step="1">
+            </label>
+          </div>
+
+          <div class="two">
+            <label>
+              <span>Bookmark location</span>
+              <select id="scope">
+                <option value="all">Use native bookmark bar/menu</option>
+                <option value="folder">Use a dedicated folder</option>
+              </select>
+              <small>Native mode imports into your normal bookmark hierarchy.</small>
+            </label>
+            <label>
+              <span>Dedicated folder name</span>
+              <input id="folderName" type="text" placeholder="QuietMarks">
+            </label>
+          </div>
+
+          <label>
+            <span>Conflict handling</span>
+            <select id="conflictPolicy">
+              <option value="merge">Auto merge safely</option>
+              <option value="local">Prefer this browser</option>
+              <option value="remote">Prefer WebDAV cloud</option>
+            </select>
+            <small>Auto merge is the default. Prefer modes are recovery tools when one side is known to be correct.</small>
+          </label>
+
+          <section class="sync-control">
+            <div>
+              <strong>Auto sync</strong>
+              <span id="autoSyncHint">Off. Use Sync now for manual sync.</span>
+            </div>
+            <label class="switch" title="Automatically sync bookmark changes in the background">
+              <input id="enabled" type="checkbox">
+              <span></span>
+            </label>
+          </section>
+
+          <div class="actions">
+            <button id="saveBtn" class="button secondary" type="submit">Save settings</button>
+            <button id="testWebdavBtn" class="button secondary" type="button">Test WebDAV</button>
+            <button id="syncBtn" class="button primary" type="button">Sync now</button>
+          </div>
+          <p id="actionMessage" class="action-message"></p>
+        </form>
+
+        <aside class="panel telemetry">
+          <div class="status-row">
+            <span id="statusDot" class="dot idle"></span>
+            <strong id="statusText">Loading</strong>
+          </div>
+          <p id="statusMeta">Reading local settings...</p>
+          <dl>
+            <div>
+              <dt>Local base</dt>
+              <dd id="baseNodeCount">0 nodes</dd>
+            </div>
+            <div>
+              <dt>Last merge</dt>
+              <dd id="lastStats">No sync yet</dd>
+            </div>
+            <div>
+              <dt>Device</dt>
+              <dd id="deviceName">Local browser</dd>
+            </div>
+          </dl>
+          <button id="resetBase" class="link-button" type="button">Reset local sync memory</button>
+        </aside>
+      </section>
+      <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    </main>
+    <script src="popup.js"></script>
+  </body>
+</html>

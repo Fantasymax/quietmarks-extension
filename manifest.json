@@ -1,0 +1,30 @@
+{
+  "manifest_version": 3,
+  "name": "QuietMarks",
+  "version": "0.1.5",
+  "description": "Private automatic bookmark sync with WebDAV, encrypted state, and three-way merge.",
+  "permissions": [
+    "alarms",
+    "bookmarks",
+    "storage",
+    "unlimitedStorage"
+  ],
+  "host_permissions": [
+    "http://*/*",
+    "https://*/*"
+  ],
+  "background": {
+    "service_worker": "src/background.js"
+  },
+  "action": {
+    "default_popup": "src/popup.html",
+    "default_title": "QuietMarks"
+  },
+  "options_page": "src/options.html",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "quietmarks@local",
+      "strict_min_version": "109.0"
+    }
+  }
+}
