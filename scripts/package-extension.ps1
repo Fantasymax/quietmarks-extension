@@ -27,9 +27,7 @@ New-Item -ItemType Directory -Path $stage | Out-Null
 $packageItems = @(
   "manifest.json",
   "README.md",
-  "HANDOFF.md",
   "ARCHITECTURE.md",
-  "INTEGRATION.md",
   "src"
 )
 

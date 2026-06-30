@@ -167,7 +167,13 @@
     if (base) base.textContent = `${baseNodeCount || 0} nodes`;
     if (device) device.textContent = config.deviceName || "This browser";
     if (lastStats) {
-      lastStats.textContent = `${stats.mergedNodes || 0} merged, ${stats.conflicts || 0} conflicts`;
+      const local = Number(stats.localNodes || 0);
+      const cloud = Number(stats.remoteNodes || 0);
+      const merged = Number(stats.mergedNodes || 0);
+      const applied = Number(stats.appliedNodes || 0);
+      const missing = Number(stats.missingAfterApply || 0);
+      const conflicts = Number(stats.conflicts || 0);
+      lastStats.textContent = `Local ${local}, cloud ${cloud}, merged ${merged}, applied ${applied}, missing ${missing}, conflicts ${conflicts}`;
     }
     if (meta && config.lastSyncAt && !config.lastSyncError) {
       meta.textContent = `Last sync ${new Date(config.lastSyncAt).toLocaleString()}`;

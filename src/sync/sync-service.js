@@ -67,6 +67,34 @@
       return nextConfig;
     }
 
+    activeNodeCount(state) {
+      return Object.values(state.nodes || {}).filter((node) => node && node.type !== "root" && !node.deleted).length;
+    }
+
+    verifyAppliedState(expectedState, verifiedState) {
+      const missing = [];
+      Object.values(expectedState.nodes || {}).forEach((node) => {
+        if (!node || node.type === "root" || node.deleted) return;
+        const actual = verifiedState.nodes && verifiedState.nodes[node.guid];
+        if (!actual || actual.deleted) {
+          missing.push(node);
+        }
+      });
+
+      if (missing.length) {
+        const examples = missing
+          .slice(0, 3)
+          .map((node) => node.title || node.url || node.guid)
+          .join(", ");
+        throw new Error(`Browser bookmark verification failed: ${missing.length} merged item(s) were not visible after apply${examples ? ` (${examples})` : ""}.`);
+      }
+
+      return {
+        verifiedNodes: this.activeNodeCount(verifiedState),
+        missingAfterApply: 0
+      };
+    }
+
     async run(reason) {
       if (this.syncInFlight) {
         this.pendingSync = true;
@@ -111,13 +139,23 @@
             scanned.guidToId,
             scanned.idToGuid
           );
+          const verified = await this.bookmarkAdapter.scanLocal(
+            currentConfig,
+            merged.state,
+            merged.state,
+            appliedMappings.idToGuid,
+            appliedMappings.guidToId
+          );
+          const verificationStats = this.verifyAppliedState(merged.state, verified.state);
 
           try {
             await this.remoteStore.putState(currentConfig, merged.state, remoteBundle.etag, remoteBundle.exists);
             const stats = {
-              localNodes: Object.keys(scanned.state.nodes).length,
-              remoteNodes: Object.keys(remoteBundle.state.nodes || {}).length,
-              mergedNodes: Object.keys(merged.state.nodes).length,
+              localNodes: this.activeNodeCount(scanned.state),
+              remoteNodes: this.activeNodeCount(remoteBundle.state),
+              mergedNodes: this.activeNodeCount(merged.state),
+              appliedNodes: verificationStats.verifiedNodes,
+              missingAfterApply: verificationStats.missingAfterApply,
               conflicts: merged.conflicts.length
             };
             currentConfig = await this.saveStatus(currentConfig, "Synced", "", stats);

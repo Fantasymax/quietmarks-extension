@@ -13,6 +13,7 @@ The project is an early prototype. Export your bookmarks before using it on an i
 - Uses stable local GUID mappings so different browser bookmark IDs can converge.
 - Avoids WebDAV move/rename operations for better compatibility with common providers.
 - Includes a WebDAV write test before syncing.
+- Verifies the native browser bookmark tree after applying a merged state, so apply failures are reported instead of being treated as a successful sync.
 
 ## Current Status
 
@@ -59,6 +60,10 @@ QuietMarks is conservative by default:
 
 The UI currently reports conflict counts. A detailed conflict history/review screen is planned.
 
+## Status Details
+
+QuietMarks reports the last sync result with local, cloud, merged, applied, missing, and conflict counts. In normal operation, `missing` should stay at `0`. If it is greater than `0`, the WebDAV state was read and merged, but one or more merged bookmarks were not visible in the browser bookmark tree after apply.
+
 ## Build Package
 
 Generate a ZIP package:
@@ -82,6 +87,13 @@ Get-ChildItem -Recurse -Filter *.js .\src | ForEach-Object { node --check $_.Ful
 node -e "JSON.parse(require('fs').readFileSync('manifest.json','utf8')); console.log('manifest ok')"
 ```
 
+Run the focused Node tests:
+
+```powershell
+node .\tests\bookmark-adapter.test.js
+node .\tests\sync-service.test.js
+```
+
 ## Privacy Notes
 
 QuietMarks stores extension settings locally in browser extension storage. WebDAV credentials and the optional encryption passphrase are currently stored there as part of this prototype. For higher assurance, use browser/profile protections and consider a future native integration with an encrypted local vault.
@@ -91,7 +103,7 @@ When a passphrase is set, bookmark payloads written to WebDAV are encrypted with
 ## Roadmap
 
 - Add detailed diagnostics and conflict history.
-- Add focused tests for merge behavior.
+- Add more focused tests for merge behavior.
 - Improve duplicate detection for independently created same-URL bookmarks.
 - Add a first-run backup reminder or helper.
 - Prepare a dedicated Firefox package.

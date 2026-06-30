@@ -356,6 +356,46 @@
       }
     }
 
+    forgetMapping(guid, id, nextGuidToId, nextIdToGuid) {
+      if (guid) delete nextGuidToId[guid];
+      if (id) delete nextIdToGuid[id];
+      Object.keys(nextIdToGuid).forEach((localId) => {
+        if (nextIdToGuid[localId] === guid) delete nextIdToGuid[localId];
+      });
+    }
+
+    async updateOrForget(node, id, changes, nextGuidToId, nextIdToGuid) {
+      try {
+        await this.extensionApi.updateBookmark(id, changes);
+        return true;
+      } catch (_) {
+        this.forgetMapping(node.guid, id, nextGuidToId, nextIdToGuid);
+        return false;
+      }
+    }
+
+    async createOrThrow(node, payload, nextGuidToId, nextIdToGuid) {
+      try {
+        const created = await this.extensionApi.createBookmark(payload);
+        if (!created || !created.id) {
+          throw new Error("Browser did not return a bookmark id.");
+        }
+        nextGuidToId[node.guid] = created.id;
+        nextIdToGuid[created.id] = node.guid;
+        return created.id;
+      } catch (error) {
+        throw new Error(`Failed to create browser bookmark "${node.title || node.url || node.guid}": ${error.message || String(error)}`);
+      }
+    }
+
+    async moveOrThrow(node, id, destination) {
+      try {
+        await this.extensionApi.moveBookmark(id, destination);
+      } catch (error) {
+        throw new Error(`Failed to place browser bookmark "${node.title || node.url || node.guid}": ${error.message || String(error)}`);
+      }
+    }
+
     async applyStateToLocal(config, state, guidToId, idToGuid) {
       if (this.hooks.onApplyStart) this.hooks.onApplyStart();
       try {
@@ -388,23 +428,26 @@
 
           let id = nextGuidToId[node.guid];
           if (!id) {
-            const created = await this.extensionApi.createBookmark({
+            id = await this.createOrThrow(node, {
               parentId,
               title: node.title || "Untitled"
-            });
-            id = created.id;
-            nextGuidToId[node.guid] = id;
-            nextIdToGuid[id] = node.guid;
+            }, nextGuidToId, nextIdToGuid);
           } else {
-            await this.extensionApi.updateBookmark(id, {
+            const updated = await this.updateOrForget(node, id, {
               title: node.title || "Untitled"
-            }).catch(() => {});
+            }, nextGuidToId, nextIdToGuid);
+            if (!updated) {
+              id = await this.createOrThrow(node, {
+                parentId,
+                title: node.title || "Untitled"
+              }, nextGuidToId, nextIdToGuid);
+            }
           }
 
-          await this.extensionApi.moveBookmark(id, {
+          await this.moveOrThrow(node, id, {
             parentId,
             index: Math.max(0, Number(node.index || 0))
-          }).catch(() => {});
+          });
         }
 
         for (const node of activeNodesByDepth(state, false)) {
@@ -413,25 +456,29 @@
 
           let id = nextGuidToId[node.guid];
           if (!id) {
-            const created = await this.extensionApi.createBookmark({
+            id = await this.createOrThrow(node, {
               parentId,
               title: node.title || node.url || "Untitled",
               url: node.url
-            });
-            id = created.id;
-            nextGuidToId[node.guid] = id;
-            nextIdToGuid[id] = node.guid;
+            }, nextGuidToId, nextIdToGuid);
           } else {
-            await this.extensionApi.updateBookmark(id, {
+            const updated = await this.updateOrForget(node, id, {
               title: node.title || node.url || "Untitled",
               url: node.url
-            }).catch(() => {});
+            }, nextGuidToId, nextIdToGuid);
+            if (!updated) {
+              id = await this.createOrThrow(node, {
+                parentId,
+                title: node.title || node.url || "Untitled",
+                url: node.url
+              }, nextGuidToId, nextIdToGuid);
+            }
           }
 
-          await this.extensionApi.moveBookmark(id, {
+          await this.moveOrThrow(node, id, {
             parentId,
             index: Math.max(0, Number(node.index || 0))
-          }).catch(() => {});
+          });
         }
 
         return {
