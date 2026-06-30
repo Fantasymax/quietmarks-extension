@@ -121,6 +121,55 @@
     return readable;
   }
 
+  function permissionOrigin(webdavUrl) {
+    try {
+      const url = new URL(webdavUrl);
+      if (!/^https?:$/.test(url.protocol)) return "";
+      return `${url.protocol}//${url.host}/*`;
+    } catch (error) {
+      return "";
+    }
+  }
+
+  function callPermissions(method, details) {
+    const permissions = api.permissions;
+    if (!permissions || typeof permissions[method] !== "function") {
+      return Promise.resolve(true);
+    }
+
+    return new Promise((resolve, reject) => {
+      try {
+        const result = permissions[method](details, (granted) => {
+          const lastError = api.runtime && api.runtime.lastError;
+          if (lastError) {
+            reject(new Error(lastError.message));
+            return;
+          }
+          resolve(Boolean(granted));
+        });
+        if (result && typeof result.then === "function") {
+          result.then(resolve, reject);
+        }
+      } catch (error) {
+        reject(error);
+      }
+    });
+  }
+
+  async function ensureWebDavPermission(config) {
+    const origin = permissionOrigin(config.webdavUrl);
+    if (!origin) return;
+
+    const details = {
+      origins: [origin]
+    };
+    setActionMessage("Chrome needs permission to reach this WebDAV host.", "");
+    const granted = await callPermissions("request", details);
+    if (!granted) {
+      throw new Error("Permission was not granted for the WebDAV host.");
+    }
+  }
+
   function setButtonState(button, label, state) {
     if (!button) return;
     button.textContent = label;
@@ -199,8 +248,10 @@
       setButtonState(saveBtn, "Saving...", "busy");
       setActionMessage("Saving settings...", "");
     }
+    const nextConfig = readForm();
+    await ensureWebDavPermission(nextConfig);
     const response = await send("quietmarks:save", {
-      config: readForm()
+      config: nextConfig
     });
     if (!response || response.ok === false) {
       if (!opts.silent) setButtonState(saveBtn, "Save failed", "bad");
@@ -253,9 +304,11 @@
     const testBtn = element("testWebdavBtn");
     setButtonState(testBtn, "Testing...", "busy");
     setActionMessage("Checking WebDAV folder and write permission...", "");
+    const config = readForm();
+    await ensureWebDavPermission(config);
 
     const response = await send("quietmarks:test-webdav", {
-      config: readForm()
+      config
     });
 
     if (!response || response.ok === false) {

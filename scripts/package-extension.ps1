@@ -28,6 +28,7 @@ $packageItems = @(
   "manifest.json",
   "README.md",
   "ARCHITECTURE.md",
+  "PRIVACY.md",
   "src"
 )
 
