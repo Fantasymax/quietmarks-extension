@@ -21,6 +21,11 @@ The project is an early prototype. Export your bookmarks before using it on an i
 - Edge / Opera: expected to work through Chromium extension support.
 - Firefox: code is structured for compatibility, but a dedicated Firefox package/signing flow still needs testing.
 
+## Changelog
+
+- `0.1.8`: Falls back to placing bookmarks at the end of the parent folder when a browser rejects a remote bookmark index as out of bounds.
+- `0.1.7`: Verifies the native browser bookmark tree after applying merged state and reports applied/missing counts.
+
 ## Install For Local Testing
 
 1. Clone or download this repository.

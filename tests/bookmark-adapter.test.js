@@ -79,6 +79,10 @@ class FakeExtensionApi {
   async createBookmark(payload) {
     const parent = this.nodes[payload.parentId];
     if (!parent) throw new Error(`Parent ${payload.parentId} not found`);
+    const index = payload.index == null ? parent.children.length : payload.index;
+    if (index < 0 || index > parent.children.length) {
+      throw new Error("Index out of bounds.");
+    }
     const id = String(this.nextId++);
     const node = {
       id,
@@ -87,11 +91,7 @@ class FakeExtensionApi {
       children: payload.url ? undefined : []
     };
     this.nodes[id] = node;
-    parent.children.splice(
-      payload.index == null ? parent.children.length : payload.index,
-      0,
-      node
-    );
+    parent.children.splice(index, 0, node);
     return this.clone(node);
   }
 
@@ -107,12 +107,16 @@ class FakeExtensionApi {
     const parent = this.nodes[destination.parentId];
     if (!node) throw new Error(`Bookmark ${id} not found`);
     if (!parent) throw new Error(`Parent ${destination.parentId} not found`);
+    const destinationIndex = destination.index == null ? parent.children.length : destination.index;
+    if (destinationIndex < 0 || destinationIndex > parent.children.length) {
+      throw new Error("Index out of bounds.");
+    }
     Object.values(this.nodes).forEach((candidate) => {
       if (!Array.isArray(candidate.children)) return;
       const index = candidate.children.findIndex((child) => child.id === id);
       if (index >= 0) candidate.children.splice(index, 1);
     });
-    parent.children.splice(destination.index || 0, 0, node);
+    parent.children.splice(destination.index == null ? parent.children.length : destination.index, 0, node);
     return this.clone(node);
   }
 
@@ -176,8 +180,59 @@ async function testStaleMappingRecreatesBookmark() {
   assert.strictEqual(result.idToGuid[result.guidToId["remote:bookmark"]], "remote:bookmark");
 }
 
+async function testOutOfBoundsIndexFallsBackToParentEnd() {
+  const context = createContext();
+  const api = new FakeExtensionApi();
+  const adapter = new context.QuietMarks.BookmarkAdapter(api);
+  const state = {
+    version: 1,
+    updatedAt: "2026-06-30T00:00:00.000Z",
+    lastWriter: "remote",
+    roots: ["root:toolbar"],
+    events: [],
+    nodes: {
+      "root:toolbar": {
+        guid: "root:toolbar",
+        type: "root",
+        title: "Bookmarks bar",
+        parentGuid: "",
+        index: 0,
+        deleted: false
+      },
+      "remote:folder": {
+        guid: "remote:folder",
+        type: "folder",
+        title: "Chrome \u6d4f\u89c8\u5668\u540c\u6b65",
+        parentGuid: "root:toolbar",
+        index: 99,
+        deleted: false
+      }
+    }
+  };
+
+  const result = await adapter.applyStateToLocal(
+    {
+      scope: "all",
+      clientId: "local"
+    },
+    state,
+    {
+      "root:toolbar": "1"
+    },
+    {
+      "1": "root:toolbar"
+    }
+  );
+
+  const toolbar = api.nodes["1"];
+  assert.strictEqual(toolbar.children.length, 1);
+  assert.strictEqual(toolbar.children[0].title, "Chrome \u6d4f\u89c8\u5668\u540c\u6b65");
+  assert.strictEqual(result.idToGuid[result.guidToId["remote:folder"]], "remote:folder");
+}
+
 async function run() {
   await testStaleMappingRecreatesBookmark();
+  await testOutOfBoundsIndexFallsBackToParentEnd();
   console.log("bookmark-adapter tests passed");
 }
 

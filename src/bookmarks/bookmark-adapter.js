@@ -392,7 +392,18 @@
       try {
         await this.extensionApi.moveBookmark(id, destination);
       } catch (error) {
-        throw new Error(`Failed to place browser bookmark "${node.title || node.url || node.guid}": ${error.message || String(error)}`);
+        const message = error.message || String(error);
+        if (/index.*bounds/i.test(message) && destination && destination.parentId) {
+          try {
+            await this.extensionApi.moveBookmark(id, {
+              parentId: destination.parentId
+            });
+            return;
+          } catch (retryError) {
+            throw new Error(`Failed to place browser bookmark "${node.title || node.url || node.guid}": ${retryError.message || String(retryError)}`);
+          }
+        }
+        throw new Error(`Failed to place browser bookmark "${node.title || node.url || node.guid}": ${message}`);
       }
     }
 
