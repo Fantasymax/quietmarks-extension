@@ -388,16 +388,55 @@
       }
     }
 
+    findTreeNodeById(tree, id) {
+      const roots = Array.isArray(tree) ? tree : [];
+      const stack = roots.map((node) => ({
+        node,
+        parent: null
+      }));
+
+      while (stack.length) {
+        const current = stack.pop();
+        if (current.node && current.node.id === id) return current;
+        ((current.node && current.node.children) || []).forEach((child) => {
+          stack.push({
+            node: child,
+            parent: current.node
+          });
+        });
+      }
+
+      return null;
+    }
+
+    async boundedMoveDestination(id, destination) {
+      if (!destination || destination.index == null || !destination.parentId) return destination;
+      const requestedIndex = Math.max(0, Number(destination.index || 0));
+      const tree = await this.extensionApi.getTree();
+      const parentMatch = this.findTreeNodeById(tree, destination.parentId);
+      if (!parentMatch || !parentMatch.node || !Array.isArray(parentMatch.node.children)) {
+        return destination;
+      }
+
+      const movingWithinParent = parentMatch.node.children.some((child) => child && child.id === id);
+      const maxIndex = Math.max(0, parentMatch.node.children.length - (movingWithinParent ? 1 : 0));
+      return {
+        parentId: destination.parentId,
+        index: Math.min(requestedIndex, maxIndex)
+      };
+    }
+
     async moveOrThrow(node, id, destination) {
       try {
-        await this.extensionApi.moveBookmark(id, destination);
+        await this.extensionApi.moveBookmark(id, await this.boundedMoveDestination(id, destination));
       } catch (error) {
         const message = error.message || String(error);
         if (/index.*bounds/i.test(message) && destination && destination.parentId) {
           try {
-            await this.extensionApi.moveBookmark(id, {
-              parentId: destination.parentId
-            });
+            await this.extensionApi.moveBookmark(id, await this.boundedMoveDestination(id, {
+              parentId: destination.parentId,
+              index: 0
+            }));
             return;
           } catch (retryError) {
             throw new Error(`Failed to place browser bookmark "${node.title || node.url || node.guid}": ${retryError.message || String(retryError)}`);
