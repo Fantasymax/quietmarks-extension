@@ -23,6 +23,7 @@ The project is an early prototype. Export your bookmarks before using it on an i
 
 ## Changelog
 
+- `0.1.11`: Adds WebDAV request timeouts and clearer messaging when another sync is already running.
 - `0.1.10`: Uses static WebDAV host permissions and restores the sync button state when pre-sync setup fails.
 - `0.1.9`: Clamps bookmark move indexes against the live browser bookmark tree before calling the browser API.
 - `0.1.8`: Falls back to placing bookmarks at the end of the parent folder when a browser rejects a remote bookmark index as out of bounds.

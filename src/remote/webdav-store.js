@@ -3,6 +3,7 @@
 
   const QuietMarks = root.QuietMarks = root.QuietMarks || {};
   const { blankState, normalizeState, cleanRemoteFile } = QuietMarks.StateModel;
+  const { WEBDAV_TIMEOUT_MS } = QuietMarks.Constants;
 
   class WebDavStore {
     constructor(cryptoCodec) {
@@ -21,6 +22,26 @@
       return this.requestHeaders(config, {
         "Content-Type": "application/json; charset=utf-8"
       });
+    }
+
+    async fetchWithTimeout(url, options, label) {
+      const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
+      const timeoutId = controller
+        ? setTimeout(() => controller.abort(), WEBDAV_TIMEOUT_MS)
+        : null;
+      try {
+        return await fetch(url, {
+          ...(options || {}),
+          signal: controller ? controller.signal : undefined
+        });
+      } catch (error) {
+        if (error && error.name === "AbortError") {
+          throw new Error(`WebDAV ${label} timed out after ${Math.round(WEBDAV_TIMEOUT_MS / 1000)} seconds.`);
+        }
+        throw error;
+      } finally {
+        if (timeoutId) clearTimeout(timeoutId);
+      }
     }
 
     remoteBaseUrl(config) {
@@ -58,14 +79,14 @@
     }
 
     async folderExists(config, url, label) {
-      const response = await fetch(url, {
+      const response = await this.fetchWithTimeout(url, {
         method: "PROPFIND",
         headers: this.requestHeaders(config, {
           "Depth": "0",
           "Content-Type": "application/xml; charset=utf-8"
         }),
         body: "<?xml version=\"1.0\" encoding=\"utf-8\"?><D:propfind xmlns:D=\"DAV:\"><D:prop><D:resourcetype/></D:prop></D:propfind>"
-      });
+      }, "PROPFIND");
 
       if (response.ok) return true;
       if (response.status === 404) return false;
@@ -80,10 +101,10 @@
     async ensureFolderUrl(config, url, label) {
       if (await this.folderExists(config, url, label)) return;
 
-      const response = await fetch(url, {
+      const response = await this.fetchWithTimeout(url, {
         method: "MKCOL",
         headers: this.requestHeaders(config)
-      });
+      }, "MKCOL");
 
       if ([201, 405].includes(response.status)) return;
 
@@ -121,14 +142,14 @@
       let wroteProbe = false;
 
       try {
-        const response = await fetch(probeUrl, {
+        const response = await this.fetchWithTimeout(probeUrl, {
           method: "PUT",
           headers: this.jsonHeaders(config),
           body: JSON.stringify({
             ok: true,
             at: new Date().toISOString()
           })
-        });
+        }, "write test");
 
         if (![200, 201, 204].includes(response.status)) {
           if (response.status === 401 || response.status === 403) {
@@ -147,20 +168,20 @@
         };
       } finally {
         if (wroteProbe) {
-          await fetch(probeUrl, {
+          await this.fetchWithTimeout(probeUrl, {
             method: "DELETE",
             headers: this.requestHeaders(config)
-          }).catch(() => {});
+          }, "cleanup").catch(() => {});
         }
       }
     }
 
     async fetchState(config) {
-      const response = await fetch(this.remoteFileUrl(config), {
+      const response = await this.fetchWithTimeout(this.remoteFileUrl(config), {
         method: "GET",
         headers: this.requestHeaders(config),
         cache: "no-store"
-      });
+      }, "GET");
 
       if (response.status === 404) {
         return {
@@ -193,11 +214,11 @@
         headers.set("If-None-Match", "*");
       }
 
-      const response = await fetch(this.remoteFileUrl(config), {
+      const response = await this.fetchWithTimeout(this.remoteFileUrl(config), {
         method: "PUT",
         headers,
         body: JSON.stringify(envelope, null, 2)
-      });
+      }, "PUT");
 
       if ([409, 412].includes(response.status)) {
         const conflict = new Error(`Remote changed during sync (${response.status})`);

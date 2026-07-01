@@ -100,7 +100,8 @@
         this.pendingSync = true;
         return {
           ok: false,
-          queued: true
+          queued: true,
+          error: "A sync is already running. Wait for it to finish, then try again."
         };
       }
 
@@ -189,7 +190,8 @@
       }
 
       return {
-        ok: false
+        ok: false,
+        error: "Sync ended without a result. Try again."
       };
     }
 

@@ -104,6 +104,9 @@
     if (message === "Failed to fetch") {
       return "Cannot reach the WebDAV server. Check the URL, network, and app password.";
     }
+    if (/A sync is already running/.test(message)) {
+      return "A sync is already running. Wait a moment, then try again.";
+    }
     if (message === "WebDAV PUT failed 404") {
       return "WebDAV target folder was not found. Use an existing WebDAV folder or set State file to QuietMarks/state.json.";
     }

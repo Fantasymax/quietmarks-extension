@@ -4,7 +4,7 @@ Use this draft when creating the Chrome Web Store listing for QuietMarks.
 
 ## Package
 
-- Upload ZIP: `dist/quietmarks-extension-v0.1.10.zip`
+- Upload ZIP: `dist/quietmarks-extension-v0.1.11.zip`
 - Small promotional tile: `dist/store-assets/promo-440x280.png`
 - Screenshot: `dist/store-assets/screenshot-1280x800.png`
 - Privacy policy file in repository: `PRIVACY.md`
@@ -110,7 +110,7 @@ The test connection action writes a temporary JSON probe file to the configured 
 
 1. Open the Chrome Web Store Developer Dashboard.
 2. Choose `New item`.
-3. Upload `dist/quietmarks-extension-v0.1.10.zip`.
+3. Upload `dist/quietmarks-extension-v0.1.11.zip`.
 4. Complete Store Listing using the text above.
 5. Upload `dist/store-assets/screenshot-1280x800.png`.
 6. Upload `dist/store-assets/promo-440x280.png` if requested.

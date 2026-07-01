@@ -245,9 +245,98 @@ async function testVerificationFailureDoesNotSaveSnapshotOrRemote() {
   assert.strictEqual(calls.savedStatuses.at(-1).status, "Error");
 }
 
+async function testConcurrentSyncReturnsReadableQueuedError() {
+  const context = createContext();
+  const blankState = context.QuietMarks.StateModel.blankState("local");
+  const config = {
+    enabled: true,
+    webdavUrl: "https://example.com/dav",
+    remoteFile: "QuietMarks/state.json",
+    clientId: "local",
+    intervalMinutes: 10,
+    conflictPolicy: "merge",
+    scope: "all",
+    lastStats: {
+      localNodes: 0,
+      remoteNodes: 0,
+      mergedNodes: 0,
+      conflicts: 0
+    }
+  };
+  let releaseFetch;
+  const stateStore = {
+    async get() {
+      return {
+        config,
+        baseState: blankState,
+        idToGuid: {},
+        guidToId: {}
+      };
+    },
+    async saveConfig(nextConfig) {
+      return nextConfig;
+    },
+    async saveSnapshot() {}
+  };
+  const remoteStore = {
+    async fetchState() {
+      await new Promise((resolve) => {
+        releaseFetch = resolve;
+      });
+      return {
+        state: blankState,
+        etag: "etag",
+        exists: true
+      };
+    },
+    async putState() {
+      return "etag2";
+    }
+  };
+  const bookmarkAdapter = {
+    async scanLocal() {
+      return {
+        state: blankState,
+        idToGuid: {},
+        guidToId: {}
+      };
+    },
+    async applyStateToLocal() {
+      return {
+        idToGuid: {},
+        guidToId: {}
+      };
+    }
+  };
+  const mergeEngine = {
+    mergeStates() {
+      return {
+        state: blankState,
+        conflicts: []
+      };
+    }
+  };
+  const service = new context.QuietMarks.SyncService({
+    stateStore,
+    remoteStore,
+    bookmarkAdapter,
+    mergeEngine
+  });
+
+  const firstRun = service.run("manual");
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  const queued = await service.run("manual");
+  assert.strictEqual(queued.ok, false);
+  assert.strictEqual(queued.queued, true);
+  assert.match(queued.error, /already running/i);
+  releaseFetch();
+  await firstRun;
+}
+
 async function run() {
   await testApplyFailureDoesNotSaveSnapshotOrRemote();
   await testVerificationFailureDoesNotSaveSnapshotOrRemote();
+  await testConcurrentSyncReturnsReadableQueuedError();
   console.log("sync-service tests passed");
 }
 
