@@ -121,55 +121,6 @@
     return readable;
   }
 
-  function permissionOrigin(webdavUrl) {
-    try {
-      const url = new URL(webdavUrl);
-      if (!/^https?:$/.test(url.protocol)) return "";
-      return `${url.protocol}//${url.host}/*`;
-    } catch (error) {
-      return "";
-    }
-  }
-
-  function callPermissions(method, details) {
-    const permissions = api.permissions;
-    if (!permissions || typeof permissions[method] !== "function") {
-      return Promise.resolve(true);
-    }
-
-    return new Promise((resolve, reject) => {
-      try {
-        const result = permissions[method](details, (granted) => {
-          const lastError = api.runtime && api.runtime.lastError;
-          if (lastError) {
-            reject(new Error(lastError.message));
-            return;
-          }
-          resolve(Boolean(granted));
-        });
-        if (result && typeof result.then === "function") {
-          result.then(resolve, reject);
-        }
-      } catch (error) {
-        reject(error);
-      }
-    });
-  }
-
-  async function ensureWebDavPermission(config) {
-    const origin = permissionOrigin(config.webdavUrl);
-    if (!origin) return;
-
-    const details = {
-      origins: [origin]
-    };
-    setActionMessage("Chrome needs permission to reach this WebDAV host.", "");
-    const granted = await callPermissions("request", details);
-    if (!granted) {
-      throw new Error("Permission was not granted for the WebDAV host.");
-    }
-  }
-
   function setButtonState(button, label, state) {
     if (!button) return;
     button.textContent = label;
@@ -249,7 +200,6 @@
       setActionMessage("Saving settings...", "");
     }
     const nextConfig = readForm();
-    await ensureWebDavPermission(nextConfig);
     const response = await send("quietmarks:save", {
       config: nextConfig
     });
@@ -274,30 +224,39 @@
 
   async function syncNow() {
     const syncBtn = element("syncBtn");
-    setStatus("Syncing", "Merging local and remote bookmark trees...");
-    setPanelStatus("Syncing");
-    setButtonState(syncBtn, "Syncing...", "busy");
-    setActionMessage("Merging local and WebDAV bookmark trees...", "");
-    await save("", {
-      silent: true,
-      keepStatus: true
-    });
-    const response = await send("quietmarks:sync-now");
-    if (!response || response.ok === false) {
-      const error = response && response.error ? response.error : "Sync failed";
-      const readableError = friendlyError(error);
+    try {
+      setStatus("Syncing", "Merging local and remote bookmark trees...");
+      setPanelStatus("Syncing");
+      setButtonState(syncBtn, "Syncing...", "busy");
+      setActionMessage("Merging local and WebDAV bookmark trees...", "");
+      await save("", {
+        silent: true,
+        keepStatus: true
+      });
+      const response = await send("quietmarks:sync-now");
+      if (!response || response.ok === false) {
+        const error = response && response.error ? response.error : "Sync failed";
+        const readableError = friendlyError(error);
+        setStatus("Error", readableError);
+        setPanelStatus("Error");
+        setButtonState(syncBtn, "Retry sync", "bad");
+        setActionMessage(readableError, "bad");
+        showToast("Sync failed", "bad");
+        return;
+      }
+      setButtonState(syncBtn, "Synced", "ok");
+      setActionMessage("Bookmarks synced successfully.", "ok");
+      showToast("Sync complete", "ok");
+      await refresh();
+      setTimeout(() => setButtonState(syncBtn, syncButtonLabel, "idle"), 1400);
+    } catch (error) {
+      const readableError = friendlyError(error.message || String(error));
       setStatus("Error", readableError);
       setPanelStatus("Error");
       setButtonState(syncBtn, "Retry sync", "bad");
       setActionMessage(readableError, "bad");
       showToast("Sync failed", "bad");
-      return;
     }
-    setButtonState(syncBtn, "Synced", "ok");
-    setActionMessage("Bookmarks synced successfully.", "ok");
-    showToast("Sync complete", "ok");
-    await refresh();
-    setTimeout(() => setButtonState(syncBtn, syncButtonLabel, "idle"), 1400);
   }
 
   async function testWebDav() {
@@ -305,7 +264,6 @@
     setButtonState(testBtn, "Testing...", "busy");
     setActionMessage("Checking WebDAV folder and write permission...", "");
     const config = readForm();
-    await ensureWebDavPermission(config);
 
     const response = await send("quietmarks:test-webdav", {
       config

@@ -43,7 +43,7 @@ QuietMarks requests storage access so it can save settings, local sync state, an
 
 QuietMarks requests alarm access so it can run automatic background sync.
 
-QuietMarks requests permission to access the WebDAV host entered by the user. It uses that host permission only for WebDAV sync requests.
+QuietMarks requests host access so it can reach the WebDAV endpoint entered by the user. It uses host access only for WebDAV sync requests.
 
 ## User Control
 

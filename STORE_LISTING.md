@@ -4,7 +4,7 @@ Use this draft when creating the Chrome Web Store listing for QuietMarks.
 
 ## Package
 
-- Upload ZIP: `dist/quietmarks-extension-v0.1.9.zip`
+- Upload ZIP: `dist/quietmarks-extension-v0.1.10.zip`
 - Small promotional tile: `dist/store-assets/promo-440x280.png`
 - Screenshot: `dist/store-assets/screenshot-1280x800.png`
 - Privacy policy file in repository: `PRIVACY.md`
@@ -69,9 +69,9 @@ Required to run periodic background sync at the interval selected by the user.
 
 Required so larger bookmark collections and sync state snapshots can be stored locally without hitting small extension storage quotas.
 
-Optional host permissions for `http://*/*` and `https://*/*`:
+Host permissions for `http://*/*` and `https://*/*`:
 
-QuietMarks does not know the user's WebDAV host in advance. It requests access only to the WebDAV origin entered by the user and uses that permission only for WebDAV sync requests.
+QuietMarks does not know the user's WebDAV host in advance because users can choose any WebDAV provider. Host access is used only for WebDAV sync requests to the URL configured by the user.
 
 ## Privacy Practices
 
@@ -102,7 +102,7 @@ If the user sets a passphrase, the bookmark payload written to WebDAV is encrypt
 
 QuietMarks requires the user to enter their own WebDAV URL, username, and app password. The extension has no developer-operated backend.
 
-Host permission is optional. The popup requests permission for the specific WebDAV origin entered by the user before saving, testing, or syncing.
+QuietMarks uses host access only for WebDAV requests to the user-configured sync endpoint. It does not read or modify website pages.
 
 The test connection action writes a temporary JSON probe file to the configured WebDAV folder and deletes it afterward.
 
@@ -110,7 +110,7 @@ The test connection action writes a temporary JSON probe file to the configured 
 
 1. Open the Chrome Web Store Developer Dashboard.
 2. Choose `New item`.
-3. Upload `dist/quietmarks-extension-v0.1.9.zip`.
+3. Upload `dist/quietmarks-extension-v0.1.10.zip`.
 4. Complete Store Listing using the text above.
 5. Upload `dist/store-assets/screenshot-1280x800.png`.
 6. Upload `dist/store-assets/promo-440x280.png` if requested.
