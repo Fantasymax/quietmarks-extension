@@ -10,6 +10,8 @@
     DELETED_RETENTION_MS: 30 * 24 * 60 * 60 * 1000,
     CHANGE_DEBOUNCE_MS: 5000,
     WEBDAV_TIMEOUT_MS: 30000,
+    SYNC_PHASE_TIMEOUT_MS: 120000,
+    POPUP_SYNC_TIMEOUT_MS: 240000,
     PBKDF2_ITERATIONS: 250000,
     DEFAULT_CONFIG: {
       enabled: false,
@@ -31,6 +33,8 @@
         localNodes: 0,
         remoteNodes: 0,
         mergedNodes: 0,
+        appliedNodes: 0,
+        missingAfterApply: 0,
         conflicts: 0
       }
     }

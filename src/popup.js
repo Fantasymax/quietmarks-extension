@@ -3,6 +3,9 @@
   "use strict";
 
   const api = typeof browser !== "undefined" ? browser : chrome;
+  const POPUP_SYNC_TIMEOUT_MS = 240000;
+  const POPUP_WEBDAV_TIMEOUT_MS = 45000;
+  const POPUP_POLL_TIMEOUT_MS = 10000;
   const fields = [
     "enabled",
     "webdavUrl",
@@ -22,8 +25,22 @@
   let syncButtonLabel = "Sync now";
   let testWebdavButtonLabel = "Test WebDAV";
 
-  function send(type, payload) {
+  function send(type, payload, timeoutMs) {
     return new Promise((resolve, reject) => {
+      let settled = false;
+      const timeoutId = timeoutMs
+        ? setTimeout(() => {
+          if (settled) return;
+          settled = true;
+          reject(new Error(`${type} did not respond after ${Math.round(timeoutMs / 1000)} seconds. The background sync may be stuck; reload the extension and try again.`));
+        }, timeoutMs)
+        : null;
+      const finish = (fn, value) => {
+        if (settled) return;
+        settled = true;
+        if (timeoutId) clearTimeout(timeoutId);
+        fn(value);
+      };
       try {
         const message = {
           type,
@@ -32,16 +49,16 @@
         const result = api.runtime.sendMessage(message, (response) => {
           const lastError = api.runtime.lastError;
           if (lastError) {
-            reject(new Error(lastError.message));
+            finish(reject, new Error(lastError.message));
             return;
           }
-          resolve(response);
+          finish(resolve, response);
         });
         if (result && typeof result.then === "function") {
-          result.then(resolve, reject);
+          result.then((response) => finish(resolve, response), (error) => finish(reject, error));
         }
       } catch (error) {
-        reject(error);
+        finish(reject, error);
       }
     });
   }
@@ -137,6 +154,10 @@
     document.body.classList.toggle("sync-ok", status === "Synced");
   }
 
+  function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
   function readForm() {
     const config = {};
     fields.forEach((field) => {
@@ -190,9 +211,70 @@
     setStatus(response.config.lastSyncStatus, response.config.lastSyncError);
     setPanelStatus(response.config.lastSyncStatus);
     writeStats(response.config, response.baseNodeCount);
-    if (response.config.lastSyncError) {
+    if (response.config.lastSyncStatus === "Error" && response.config.lastSyncError) {
       setActionMessage(friendlyError(response.config.lastSyncError), "bad");
+    } else if (response.config.lastSyncStatus === "Syncing" && response.config.lastSyncError) {
+      setActionMessage(response.config.lastSyncError, "");
     }
+  }
+
+  async function waitForSync(syncPromise, timeoutMs) {
+    const startedAt = Date.now();
+    let lastConfig = null;
+    let sawActiveSync = false;
+    const wrappedSync = syncPromise.then(
+      (response) => ({
+        done: true,
+        response
+      }),
+      (error) => ({
+        done: true,
+        error
+      })
+    );
+
+    while (Date.now() - startedAt < timeoutMs) {
+      const syncResult = await Promise.race([
+        wrappedSync,
+        sleep(1200).then(() => ({
+          done: false
+        }))
+      ]);
+      if (syncResult.done) {
+        if (syncResult.error) throw syncResult.error;
+        return syncResult.response;
+      }
+
+      let response = null;
+      try {
+        response = await send("quietmarks:get", null, POPUP_POLL_TIMEOUT_MS);
+      } catch (_) {
+        response = null;
+      }
+
+      if (!response || !response.config) continue;
+      lastConfig = response.config;
+      setStatus(lastConfig.lastSyncStatus, lastConfig.lastSyncError);
+      setPanelStatus(lastConfig.lastSyncStatus);
+      writeStats(lastConfig, response.baseNodeCount);
+
+      if (lastConfig.lastSyncStatus === "Syncing") {
+        sawActiveSync = true;
+        setActionMessage(lastConfig.lastSyncError || "Syncing bookmarks...", "");
+        continue;
+      }
+
+      if (sawActiveSync && (lastConfig.lastSyncStatus === "Synced" || lastConfig.lastSyncStatus === "Error")) {
+        return {
+          ok: lastConfig.lastSyncStatus === "Synced",
+          error: lastConfig.lastSyncStatus === "Error" ? lastConfig.lastSyncError : "",
+          config: lastConfig
+        };
+      }
+    }
+
+    const phase = lastConfig && lastConfig.lastSyncError ? ` Last phase: ${lastConfig.lastSyncError}` : "";
+    throw new Error(`Sync did not finish after ${Math.round(timeoutMs / 1000)} seconds.${phase}`);
   }
 
   async function save(toastMessage, options) {
@@ -236,7 +318,10 @@
         silent: true,
         keepStatus: true
       });
-      const response = await send("quietmarks:sync-now");
+      const response = await waitForSync(
+        send("quietmarks:sync-now", null, POPUP_SYNC_TIMEOUT_MS),
+        POPUP_SYNC_TIMEOUT_MS
+      );
       if (!response || response.ok === false) {
         const error = response && response.error ? response.error : "Sync failed";
         const readableError = friendlyError(error);
@@ -247,6 +332,7 @@
         showToast("Sync failed", "bad");
         return;
       }
+
       setButtonState(syncBtn, "Synced", "ok");
       setActionMessage("Bookmarks synced successfully.", "ok");
       showToast("Sync complete", "ok");
@@ -270,7 +356,7 @@
 
     const response = await send("quietmarks:test-webdav", {
       config
-    });
+    }, POPUP_WEBDAV_TIMEOUT_MS);
 
     if (!response || response.ok === false) {
       const error = friendlyWebDavError(response && response.error ? response.error : "WebDAV test failed");

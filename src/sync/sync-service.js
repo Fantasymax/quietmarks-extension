@@ -2,7 +2,7 @@
   "use strict";
 
   const QuietMarks = root.QuietMarks = root.QuietMarks || {};
-  const { DEFAULT_CONFIG } = QuietMarks.Constants;
+  const { DEFAULT_CONFIG, SYNC_PHASE_TIMEOUT_MS, WEBDAV_TIMEOUT_MS } = QuietMarks.Constants;
   const { nowIso, randomId } = QuietMarks.Utils;
   const { cleanRemoteFile } = QuietMarks.StateModel;
 
@@ -56,6 +56,10 @@
       return nextConfig;
     }
 
+    async saveProgress(config, phase) {
+      return this.saveStatus(config, "Syncing", phase, config.lastStats);
+    }
+
     async saveConfigPatch(patch) {
       const stored = await this.stateStore.get();
       const nextConfig = this.validateConfig({
@@ -69,6 +73,22 @@
 
     activeNodeCount(state) {
       return Object.values(state.nodes || {}).filter((node) => node && node.type !== "root" && !node.deleted).length;
+    }
+
+    async withTimeout(promise, label, timeoutMs) {
+      let timeoutId = null;
+      try {
+        return await Promise.race([
+          promise,
+          new Promise((_, reject) => {
+            timeoutId = setTimeout(() => {
+              reject(new Error(`${label} timed out after ${Math.round(timeoutMs / 1000)} seconds.`));
+            }, timeoutMs);
+          })
+        ]);
+      } finally {
+        if (timeoutId) clearTimeout(timeoutId);
+      }
     }
 
     verifyAppliedState(expectedState, verifiedState) {
@@ -121,36 +141,67 @@
         }
 
         currentConfig = this.validateSyncConfig(currentConfig);
-        await this.saveStatus(currentConfig, "Syncing", "", currentConfig.lastStats);
+        currentConfig = await this.saveProgress(currentConfig, "Fetching WebDAV sync state...");
 
-        let remoteBundle = await this.remoteStore.fetchState(currentConfig);
+        let remoteBundle = await this.withTimeout(
+          this.remoteStore.fetchState(currentConfig),
+          "Fetching WebDAV sync state",
+          WEBDAV_TIMEOUT_MS + 5000
+        );
         for (let attempt = 0; attempt < 3; attempt += 1) {
           const latest = await this.stateStore.get();
-          const scanned = await this.bookmarkAdapter.scanLocal(
+          currentConfig = await this.saveProgress(currentConfig, "Reading browser bookmarks...");
+          const scanned = await this.withTimeout(
+            this.bookmarkAdapter.scanLocal(
+              currentConfig,
+              latest.baseState,
+              remoteBundle.state,
+              latest.idToGuid,
+              latest.guidToId
+            ),
+            "Reading browser bookmarks",
+            SYNC_PHASE_TIMEOUT_MS
+          );
+          currentConfig = await this.saveProgress(
             currentConfig,
-            latest.baseState,
-            remoteBundle.state,
-            latest.idToGuid,
-            latest.guidToId
+            `Merging ${this.activeNodeCount(scanned.state)} local and ${this.activeNodeCount(remoteBundle.state)} WebDAV bookmark items...`
           );
           const merged = this.resolveMergedState(currentConfig, latest.baseState, scanned.state, remoteBundle.state);
-          const appliedMappings = await this.bookmarkAdapter.applyStateToLocal(
+          currentConfig = await this.saveProgress(
             currentConfig,
-            merged.state,
-            scanned.guidToId,
-            scanned.idToGuid
+            `Applying ${this.activeNodeCount(merged.state)} merged bookmark items to this browser...`
           );
-          const verified = await this.bookmarkAdapter.scanLocal(
-            currentConfig,
-            merged.state,
-            merged.state,
-            appliedMappings.idToGuid,
-            appliedMappings.guidToId
+          const appliedMappings = await this.withTimeout(
+            this.bookmarkAdapter.applyStateToLocal(
+              currentConfig,
+              merged.state,
+              scanned.guidToId,
+              scanned.idToGuid
+            ),
+            "Applying merged bookmarks",
+            SYNC_PHASE_TIMEOUT_MS
+          );
+          currentConfig = await this.saveProgress(currentConfig, "Verifying browser bookmarks after apply...");
+          const verified = await this.withTimeout(
+            this.bookmarkAdapter.scanLocal(
+              currentConfig,
+              merged.state,
+              merged.state,
+              appliedMappings.idToGuid,
+              appliedMappings.guidToId
+            ),
+            "Verifying browser bookmarks",
+            SYNC_PHASE_TIMEOUT_MS
           );
           const verificationStats = this.verifyAppliedState(merged.state, verified.state);
+          currentConfig = await this.saveProgress(currentConfig, "Writing merged state to WebDAV...");
 
           try {
-            await this.remoteStore.putState(currentConfig, merged.state, remoteBundle.etag, remoteBundle.exists);
+            await this.withTimeout(
+              this.remoteStore.putState(currentConfig, merged.state, remoteBundle.etag, remoteBundle.exists),
+              "Writing WebDAV sync state",
+              WEBDAV_TIMEOUT_MS + 5000
+            );
             const stats = {
               localNodes: this.activeNodeCount(scanned.state),
               remoteNodes: this.activeNodeCount(remoteBundle.state),
@@ -169,7 +220,12 @@
             if (!error.retryable || attempt === 2) {
               throw error;
             }
-            remoteBundle = await this.remoteStore.fetchState(currentConfig);
+            currentConfig = await this.saveProgress(currentConfig, "WebDAV changed during sync; refetching remote state...");
+            remoteBundle = await this.withTimeout(
+              this.remoteStore.fetchState(currentConfig),
+              "Refetching WebDAV sync state",
+              WEBDAV_TIMEOUT_MS + 5000
+            );
           }
         }
       } catch (error) {

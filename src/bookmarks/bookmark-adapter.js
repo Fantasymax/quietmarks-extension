@@ -428,15 +428,12 @@
 
     async moveOrThrow(node, id, destination) {
       try {
-        await this.extensionApi.moveBookmark(id, await this.boundedMoveDestination(id, destination));
+        await this.extensionApi.moveBookmark(id, destination);
       } catch (error) {
         const message = error.message || String(error);
         if (/index.*bounds/i.test(message) && destination && destination.parentId) {
           try {
-            await this.extensionApi.moveBookmark(id, await this.boundedMoveDestination(id, {
-              parentId: destination.parentId,
-              index: 0
-            }));
+            await this.extensionApi.moveBookmark(id, await this.boundedMoveDestination(id, destination));
             return;
           } catch (retryError) {
             throw new Error(`Failed to place browser bookmark "${node.title || node.url || node.guid}": ${retryError.message || String(retryError)}`);

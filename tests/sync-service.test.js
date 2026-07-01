@@ -19,6 +19,7 @@ function createContext() {
       userAgent: "Chromium"
     },
     setTimeout,
+    clearTimeout,
     globalThis: null,
     crypto: {
       getRandomValues(bytes) {
@@ -329,6 +330,7 @@ async function testConcurrentSyncReturnsReadableQueuedError() {
   assert.strictEqual(queued.ok, false);
   assert.strictEqual(queued.queued, true);
   assert.match(queued.error, /already running/i);
+  service.pendingSync = false;
   releaseFetch();
   await firstRun;
 }
