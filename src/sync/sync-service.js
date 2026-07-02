@@ -2,7 +2,7 @@
   "use strict";
 
   const QuietMarks = root.QuietMarks = root.QuietMarks || {};
-  const { DEFAULT_CONFIG, SYNC_PHASE_TIMEOUT_MS, WEBDAV_TIMEOUT_MS, WEBDAV_PUT_TIMEOUT_MS } = QuietMarks.Constants;
+  const { DEFAULT_CONFIG, SYNC_PHASE_TIMEOUT_MS, WEBDAV_TIMEOUT_MS, WEBDAV_PUT_TIMEOUT_MS, WEBDAV_FETCH_STALL_MS } = QuietMarks.Constants;
   const { nowIso, randomId } = QuietMarks.Utils;
   const { cleanRemoteFile } = QuietMarks.StateModel;
 
@@ -123,6 +123,48 @@
       };
     }
 
+    jobTimestamp(job) {
+      return Date.parse((job && (job.updatedAt || job.startedAt)) || "") || 0;
+    }
+
+    isFetchPhase(job) {
+      const phase = String((job && job.phase) || "").toLowerCase();
+      return phase.includes("fetching webdav sync state") ||
+        phase.includes("webdav get") ||
+        phase.includes("webdav fetch") ||
+        phase.includes("sending request") ||
+        phase.includes("reading response body");
+    }
+
+    isFetchJobStalled(job) {
+      if (!job || job.status !== "running" || !this.isFetchPhase(job)) return false;
+      const timestamp = this.jobTimestamp(job);
+      return Boolean(timestamp && Date.now() - timestamp > WEBDAV_FETCH_STALL_MS);
+    }
+
+    async markFetchJobStalled(config, job) {
+      const phase = job && job.phase ? job.phase : "Fetching WebDAV sync state";
+      const message = `${phase} did not finish after ${Math.round(WEBDAV_FETCH_STALL_MS / 1000)} seconds. QuietMarks stopped this sync instead of leaving it stuck. Press Sync now to retry; if it repeats, the WebDAV state file may be too large or the server may be holding the GET request open.`;
+      const failedJob = {
+        ...(job || this.createJob("stalled")),
+        status: "error",
+        phase: "Sync stalled",
+        updatedAt: nowIso(),
+        finishedAt: nowIso(),
+        error: message
+      };
+      this.syncInFlight = false;
+      this.pendingSync = false;
+      this.activeSync = null;
+      await this.persistJob(failedJob);
+      await this.saveStatus(config, "Error", message, config.lastStats);
+      return {
+        resumed: false,
+        updated: true,
+        sync: this.runtimeStatus(failedJob)
+      };
+    }
+
     alreadyRunningResponse(persistedJob) {
       this.pendingSync = true;
       return {
@@ -150,6 +192,11 @@
     async resumeIfNeeded(stored) {
       const config = stored && stored.config ? stored.config : {};
       const job = stored && stored.syncJob ? stored.syncJob : null;
+      const activeJob = this.activeSync || job;
+      if (this.isFetchJobStalled(activeJob)) {
+        return this.markFetchJobStalled(config, activeJob);
+      }
+
       const hasRunningJob = Boolean(job && job.status === "running");
       const hasLegacySyncingStatus = config.lastSyncStatus === "Syncing" && !hasRunningJob;
       const oldError = String(config.lastSyncError || "").toLowerCase();
@@ -254,7 +301,7 @@
 
         currentConfig = this.validateSyncConfig(currentConfig);
         await this.onKeepAliveStart().catch(() => {});
-        currentConfig = await this.saveProgress(currentConfig, "Fetching WebDAV sync state...");
+        currentConfig = await this.saveProgress(currentConfig, `Fetching WebDAV sync state (GET, ${Math.round(WEBDAV_TIMEOUT_MS / 1000)}s timeout)...`);
 
         let remoteBundle = await this.withTimeout(
           this.remoteStore.fetchState(currentConfig),

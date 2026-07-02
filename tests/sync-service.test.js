@@ -540,13 +540,14 @@ async function testPersistedRunningJobCanBeResumed() {
       conflicts: 0
     }
   };
+  const freshAt = new Date().toISOString();
   let syncJob = {
     id: "sync-old",
     status: "running",
     reason: "manual",
     phase: "Fetching WebDAV sync state...",
-    startedAt: "2026-01-01T00:00:00.000Z",
-    updatedAt: "2026-01-01T00:00:01.000Z",
+    startedAt: freshAt,
+    updatedAt: freshAt,
     finishedAt: "",
     error: ""
   };
@@ -730,6 +731,85 @@ async function testLegacyInterruptedErrorAutoResumes() {
   assert.strictEqual(syncJob.status, "done");
 }
 
+async function testStaleFetchJobStopsInsteadOfLoopingForever() {
+  const context = createContext();
+  const blankState = context.QuietMarks.StateModel.blankState("local");
+  let config = {
+    enabled: true,
+    webdavUrl: "https://example.com/dav",
+    remoteFile: "QuietMarks/state.json",
+    clientId: "local",
+    intervalMinutes: 10,
+    conflictPolicy: "merge",
+    scope: "all",
+    lastSyncStatus: "Syncing",
+    lastSyncError: "Fetching WebDAV sync state...",
+    lastStats: {
+      localNodes: 0,
+      remoteNodes: 0,
+      mergedNodes: 0,
+      conflicts: 0
+    }
+  };
+  let syncJob = {
+    id: "sync-stale",
+    status: "running",
+    reason: "manual",
+    phase: "Fetching WebDAV sync state...",
+    startedAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:01.000Z",
+    finishedAt: "",
+    error: ""
+  };
+  const stateStore = {
+    async get() {
+      return {
+        config,
+        baseState: blankState,
+        idToGuid: {},
+        guidToId: {},
+        syncJob
+      };
+    },
+    async saveConfig(nextConfig) {
+      config = nextConfig;
+      return nextConfig;
+    },
+    async saveSnapshot() {},
+    async saveJob(nextJob) {
+      syncJob = nextJob;
+    }
+  };
+  const service = new context.QuietMarks.SyncService({
+    stateStore,
+    remoteStore: {
+      async fetchState() {
+        throw new Error("stale job should not start a new fetch");
+      },
+      async putState() {}
+    },
+    bookmarkAdapter: {
+      async scanLocal() {
+        throw new Error("stale job should not scan bookmarks");
+      },
+      async applyStateToLocal() {}
+    },
+    mergeEngine: {
+      mergeStates() {
+        throw new Error("stale job should not merge");
+      }
+    }
+  });
+
+  const recovery = await service.resumeIfNeeded(await stateStore.get());
+  assert.strictEqual(recovery.resumed, false);
+  assert.strictEqual(recovery.updated, true);
+  assert.strictEqual(config.lastSyncStatus, "Error");
+  assert.match(config.lastSyncError, /did not finish after 90 seconds/);
+  assert.strictEqual(syncJob.status, "error");
+  assert.strictEqual(syncJob.phase, "Sync stalled");
+}
+
 async function run() {
   await testApplyFailureDoesNotSaveSnapshotOrRemote();
   await testVerificationFailureDoesNotSaveSnapshotOrRemote();
@@ -738,6 +818,7 @@ async function run() {
   await testKeepAliveHooksWrapActiveSync();
   await testPersistedRunningJobCanBeResumed();
   await testLegacyInterruptedErrorAutoResumes();
+  await testStaleFetchJobStopsInsteadOfLoopingForever();
   console.log("sync-service tests passed");
 }
 

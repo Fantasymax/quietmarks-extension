@@ -54,6 +54,7 @@
       return this.withTimeout(
         this.fetchImpl(url, {
           ...(options || {}),
+          quietmarksTimeoutMs: timeout,
           signal: controller ? controller.signal : undefined
         }),
         label,

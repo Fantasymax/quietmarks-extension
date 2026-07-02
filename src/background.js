@@ -17,9 +17,12 @@
 
   const globalApi = typeof browser !== "undefined" ? browser : chrome;
   const OFFSCREEN_DOCUMENT_PATH = "src/offscreen.html";
+  const OFFSCREEN_MESSAGE_TIMEOUT_MS = 12000;
+  const OFFSCREEN_POLL_MS = 1000;
   const {
     CHANGE_DEBOUNCE_MS,
-    SYNC_ALARM
+    SYNC_ALARM,
+    WEBDAV_TIMEOUT_MS
   } = QuietMarks.Constants;
 
   let applyDepth = 0;
@@ -101,25 +104,56 @@
     };
   }
 
-  async function offscreenFetch(url, options) {
-    await ensureOffscreenKeepAlive();
-    const response = await globalApi.runtime.sendMessage({
-      type: "quietmarks:offscreen-fetch",
-      request: {
-        url,
-        options: {
-          method: options && options.method,
-          headers: serializeHeaders(options && options.headers),
-          body: options && options.body,
-          cache: options && options.cache
+  function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  function sendRuntimeMessage(message, timeoutMs) {
+    const usesPromiseApi = typeof browser !== "undefined" && globalApi === browser;
+    const timeout = timeoutMs || OFFSCREEN_MESSAGE_TIMEOUT_MS;
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      const timeoutId = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        reject(new Error(`Extension message timed out after ${Math.round(timeout / 1000)} seconds.`));
+      }, timeout);
+      const finish = (fn, value) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeoutId);
+        fn(value);
+      };
+
+      try {
+        if (usesPromiseApi) {
+          const result = globalApi.runtime.sendMessage(message);
+          if (result && typeof result.then === "function") {
+            result.then((response) => finish(resolve, response), (error) => finish(reject, error));
+          } else {
+            finish(resolve, result);
+          }
+          return;
         }
+
+        const result = globalApi.runtime.sendMessage(message, (response) => {
+          const lastError = globalApi.runtime && globalApi.runtime.lastError;
+          if (lastError) {
+            finish(reject, new Error(lastError.message));
+            return;
+          }
+          finish(resolve, response);
+        });
+        if (result && typeof result.then === "function") {
+          result.then((response) => finish(resolve, response), (error) => finish(reject, error));
+        }
+      } catch (error) {
+        finish(reject, error);
       }
     });
+  }
 
-    if (!response || response.ok === false) {
-      throw new Error(response && response.error ? response.error : "Offscreen WebDAV fetch failed.");
-    }
-
+  function responseFromOffscreen(response) {
     return {
       ok: response.fetchOk,
       status: response.status,
@@ -132,6 +166,95 @@
         return body ? JSON.parse(body) : null;
       }
     };
+  }
+
+  async function offscreenFetch(url, options) {
+    await ensureOffscreenKeepAlive();
+    const method = options && options.method ? options.method : "fetch";
+    const timeoutMs = Number(options && options.quietmarksTimeoutMs) || WEBDAV_TIMEOUT_MS;
+    const requestId = `fetch-${Date.now()}-${QuietMarks.Utils.randomId()}`;
+    let cancelled = false;
+
+    async function cancelOffscreenFetch() {
+      if (cancelled) return;
+      cancelled = true;
+      await sendRuntimeMessage({
+        type: "quietmarks:offscreen-fetch-cancel",
+        requestId
+      }, OFFSCREEN_MESSAGE_TIMEOUT_MS).catch(() => {});
+    }
+
+    const signal = options && options.signal;
+    const abortHandler = () => {
+      cancelOffscreenFetch();
+    };
+    if (signal && typeof signal.addEventListener === "function") {
+      if (signal.aborted) {
+        await cancelOffscreenFetch();
+        throw new Error(`WebDAV ${method} timed out after ${Math.round(timeoutMs / 1000)} seconds.`);
+      }
+      signal.addEventListener("abort", abortHandler, {
+        once: true
+      });
+    }
+
+    const request = {
+      url,
+      timeoutMs,
+      options: {
+        method,
+        headers: serializeHeaders(options && options.headers),
+        body: options && options.body,
+        cache: options && options.cache
+      }
+    };
+
+    try {
+      const started = await sendRuntimeMessage({
+        type: "quietmarks:offscreen-fetch-start",
+        requestId,
+        request
+      }, OFFSCREEN_MESSAGE_TIMEOUT_MS);
+
+      if (!started || started.ok === false) {
+        throw new Error(started && started.error ? started.error : "Offscreen WebDAV fetch failed to start.");
+      }
+
+      const deadline = Date.now() + timeoutMs + OFFSCREEN_MESSAGE_TIMEOUT_MS;
+      while (Date.now() < deadline) {
+        if (signal && signal.aborted) {
+          await cancelOffscreenFetch();
+          throw new Error(`WebDAV ${method} timed out after ${Math.round(timeoutMs / 1000)} seconds.`);
+        }
+
+        const response = await sendRuntimeMessage({
+          type: "quietmarks:offscreen-fetch-result",
+          requestId
+        }, OFFSCREEN_MESSAGE_TIMEOUT_MS);
+
+        if (response && response.running) {
+          await sleep(OFFSCREEN_POLL_MS);
+          continue;
+        }
+
+        if (!response || response.ok === false) {
+          throw new Error(response && response.error ? response.error : "Offscreen WebDAV fetch failed.");
+        }
+
+        cancelled = true;
+        return responseFromOffscreen(response);
+      }
+
+      await cancelOffscreenFetch();
+      throw new Error(`WebDAV ${method} timed out after ${Math.round(timeoutMs / 1000)} seconds.`);
+    } catch (error) {
+      await cancelOffscreenFetch();
+      throw error;
+    } finally {
+      if (signal && typeof signal.removeEventListener === "function") {
+        signal.removeEventListener("abort", abortHandler);
+      }
+    }
   }
 
   async function closeOffscreenKeepAlive() {
@@ -219,7 +342,7 @@
         if (message.type === "quietmarks:get") {
           let stored = await stateStore.get();
           const recovery = await syncService.resumeIfNeeded(stored);
-          if (recovery.resumed) {
+          if (recovery.resumed || recovery.updated) {
             stored = await stateStore.get();
           }
           return {
