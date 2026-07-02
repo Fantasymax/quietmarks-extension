@@ -500,6 +500,7 @@ select {
 
 .foot {
   display: flex;
+  gap: 14px;
   justify-content: center;
   margin-top: 14px;
 }
@@ -511,6 +512,18 @@ select {
   color: var(--accent-2);
   cursor: pointer;
   font-weight: 780;
+}
+
+.link-button {
+  display: block;
+  margin-top: 10px;
+  text-align: left;
+}
+
+.foot button:disabled,
+.link-button:disabled {
+  cursor: wait;
+  opacity: 0.72;
 }
 
 .toast {

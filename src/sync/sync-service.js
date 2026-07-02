@@ -228,6 +228,26 @@
       return nextConfig;
     }
 
+    async resetSyncJob() {
+      const stored = await this.stateStore.get();
+      this.syncInFlight = false;
+      this.pendingSync = false;
+      this.activeSync = null;
+      await this.persistJob(null);
+      const status = stored.config && stored.config.webdavUrl ? "Ready" : "Not configured";
+      const config = await this.saveStatus(
+        stored.config,
+        status,
+        "Stuck sync state cleared. Press Sync now to retry.",
+        stored.config.lastStats
+      );
+      return {
+        ok: true,
+        config,
+        sync: this.runtimeStatus(null)
+      };
+    }
+
     activeNodeCount(state) {
       return Object.values(state.nodes || {}).filter((node) => node && node.type !== "root" && !node.deleted).length;
     }

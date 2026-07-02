@@ -340,15 +340,11 @@
         }
 
         if (message.type === "quietmarks:get") {
-          let stored = await stateStore.get();
-          const recovery = await syncService.resumeIfNeeded(stored);
-          if (recovery.resumed || recovery.updated) {
-            stored = await stateStore.get();
-          }
+          const stored = await stateStore.get();
           return {
             config: stored.config,
             baseNodeCount: Object.keys(stored.baseState.nodes || {}).length,
-            sync: recovery.sync || syncService.runtimeStatus(stored.syncJob)
+            sync: syncService.runtimeStatus(stored.syncJob)
           };
         }
 
@@ -375,6 +371,10 @@
           return {
             ok: true
           };
+        }
+
+        if (message.type === "quietmarks:reset-sync-job") {
+          return syncService.resetSyncJob();
         }
 
         return null;

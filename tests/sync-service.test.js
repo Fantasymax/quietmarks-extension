@@ -810,6 +810,74 @@ async function testStaleFetchJobStopsInsteadOfLoopingForever() {
   assert.strictEqual(syncJob.phase, "Sync stalled");
 }
 
+async function testResetSyncJobClearsPersistedRunningState() {
+  const context = createContext();
+  const blankState = context.QuietMarks.StateModel.blankState("local");
+  let config = {
+    enabled: true,
+    webdavUrl: "https://example.com/dav",
+    remoteFile: "QuietMarks/state.json",
+    clientId: "local",
+    intervalMinutes: 10,
+    conflictPolicy: "merge",
+    scope: "all",
+    lastSyncStatus: "Syncing",
+    lastSyncError: "Fetching WebDAV sync state...",
+    lastStats: {
+      localNodes: 0,
+      remoteNodes: 0,
+      mergedNodes: 0,
+      conflicts: 0
+    }
+  };
+  let syncJob = {
+    id: "sync-stuck",
+    status: "running",
+    reason: "manual",
+    phase: "Fetching WebDAV sync state...",
+    startedAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    finishedAt: "",
+    error: ""
+  };
+  const stateStore = {
+    async get() {
+      return {
+        config,
+        baseState: blankState,
+        idToGuid: {},
+        guidToId: {},
+        syncJob
+      };
+    },
+    async saveConfig(nextConfig) {
+      config = nextConfig;
+      return nextConfig;
+    },
+    async saveSnapshot() {},
+    async saveJob(nextJob) {
+      syncJob = nextJob;
+    }
+  };
+  const service = new context.QuietMarks.SyncService({
+    stateStore,
+    remoteStore: {},
+    bookmarkAdapter: {},
+    mergeEngine: {}
+  });
+  service.syncInFlight = true;
+  service.pendingSync = true;
+  service.activeSync = syncJob;
+
+  const result = await service.resetSyncJob();
+
+  assert.strictEqual(result.ok, true);
+  assert.strictEqual(syncJob, null);
+  assert.strictEqual(result.sync.inFlight, false);
+  assert.strictEqual(config.lastSyncStatus, "Ready");
+  assert.match(config.lastSyncError, /Stuck sync state cleared/);
+}
+
 async function run() {
   await testApplyFailureDoesNotSaveSnapshotOrRemote();
   await testVerificationFailureDoesNotSaveSnapshotOrRemote();
@@ -819,6 +887,7 @@ async function run() {
   await testPersistedRunningJobCanBeResumed();
   await testLegacyInterruptedErrorAutoResumes();
   await testStaleFetchJobStopsInsteadOfLoopingForever();
+  await testResetSyncJobClearsPersistedRunningState();
   console.log("sync-service tests passed");
 }
 

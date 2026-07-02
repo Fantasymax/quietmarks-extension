@@ -6,6 +6,7 @@
   const POPUP_SYNC_TIMEOUT_MS = 480000;
   const POPUP_WEBDAV_TIMEOUT_MS = 45000;
   const POPUP_POLL_TIMEOUT_MS = 10000;
+  const POPUP_SAVE_TIMEOUT_MS = 10000;
   const fields = [
     "enabled",
     "webdavUrl",
@@ -24,6 +25,7 @@
   let savedButtonLabel = "Save";
   let syncButtonLabel = "Sync now";
   let testWebdavButtonLabel = "Test WebDAV";
+  let resetSyncButtonLabel = "Clear stuck sync";
   let followTimer = null;
 
   function send(type, payload, timeoutMs) {
@@ -155,9 +157,25 @@
     document.body.classList.toggle("sync-ok", status === "Synced");
   }
 
+  function isSyncRunning(config, sync) {
+    return Boolean(sync && sync.inFlight);
+  }
+
+  function displayConfig(config, sync) {
+    if (!config) return config;
+    if (config.lastSyncStatus === "Syncing" && !isSyncRunning(config, sync)) {
+      return {
+        ...config,
+        lastSyncStatus: "Ready",
+        lastSyncError: "Previous sync state was left open. Use Clear stuck sync, then Sync now."
+      };
+    }
+    return config;
+  }
+
   function renderSyncControls(config, sync) {
     const syncBtn = element("syncBtn");
-    const isRunning = Boolean((sync && sync.inFlight) || config.lastSyncStatus === "Syncing");
+    const isRunning = isSyncRunning(config, sync);
     if (isRunning) {
       setButtonState(syncBtn, "Syncing...", "busy");
       setActionMessage(config.lastSyncError || "Sync is running in the background...", "");
@@ -218,21 +236,24 @@
 
   function renderState(response) {
     if (!response || !response.config) return response;
+    const visibleConfig = displayConfig(response.config, response.sync);
     writeForm(response.config);
-    setStatus(response.config.lastSyncStatus, response.config.lastSyncError);
-    setPanelStatus(response.config.lastSyncStatus);
+    setStatus(visibleConfig.lastSyncStatus, visibleConfig.lastSyncError);
+    setPanelStatus(visibleConfig.lastSyncStatus);
     writeStats(response.config, response.baseNodeCount);
-    renderSyncControls(response.config, response.sync);
-    if (response.config.lastSyncStatus === "Error" && response.config.lastSyncError) {
-      setActionMessage(friendlyError(response.config.lastSyncError), "bad");
-    } else if (response.config.lastSyncStatus === "Syncing" && response.config.lastSyncError) {
-      setActionMessage(response.config.lastSyncError, "");
+    renderSyncControls(visibleConfig, response.sync);
+    if (visibleConfig.lastSyncStatus === "Error" && visibleConfig.lastSyncError) {
+      setActionMessage(friendlyError(visibleConfig.lastSyncError), "bad");
+    } else if (visibleConfig.lastSyncStatus === "Syncing" && visibleConfig.lastSyncError) {
+      setActionMessage(visibleConfig.lastSyncError, "");
+    } else if (visibleConfig.lastSyncStatus === "Ready" && visibleConfig.lastSyncError) {
+      setActionMessage(visibleConfig.lastSyncError, "");
     }
     return response;
   }
 
   async function refresh() {
-    const response = await send("quietmarks:get");
+    const response = await send("quietmarks:get", null, POPUP_POLL_TIMEOUT_MS);
     return renderState(response);
   }
 
@@ -242,7 +263,7 @@
       try {
         const response = await send("quietmarks:get", null, POPUP_POLL_TIMEOUT_MS);
         renderState(response);
-        const running = response && response.config && ((response.sync && response.sync.inFlight) || response.config.lastSyncStatus === "Syncing");
+        const running = response && response.config && isSyncRunning(response.config, response.sync);
         if (!running) {
           clearInterval(followTimer);
           followTimer = null;
@@ -299,7 +320,7 @@
       if (!response || !response.config) continue;
       renderState(response);
       lastConfig = response.config;
-      const running = Boolean((response.sync && response.sync.inFlight) || lastConfig.lastSyncStatus === "Syncing");
+      const running = isSyncRunning(lastConfig, response.sync);
 
       if (running) {
         sawActiveSync = true;
@@ -328,11 +349,27 @@
       setActionMessage("Saving settings...", "");
     }
     const nextConfig = readForm();
-    const response = await send("quietmarks:save", {
-      config: nextConfig
-    });
+    let response = null;
+    try {
+      response = await send("quietmarks:save", {
+        config: nextConfig
+      }, POPUP_SAVE_TIMEOUT_MS);
+    } catch (error) {
+      const readableError = friendlyError(error.message || String(error));
+      if (!opts.silent) {
+        setButtonState(saveBtn, "Save failed", "bad");
+        setTimeout(() => setButtonState(saveBtn, savedButtonLabel, "idle"), 1800);
+        showToast("Save failed", "bad");
+      }
+      setActionMessage(readableError, "bad");
+      throw error;
+    }
     if (!response || response.ok === false) {
-      if (!opts.silent) setButtonState(saveBtn, "Save failed", "bad");
+      if (!opts.silent) {
+        setButtonState(saveBtn, "Save failed", "bad");
+        setTimeout(() => setButtonState(saveBtn, savedButtonLabel, "idle"), 1800);
+        showToast("Save failed", "bad");
+      }
       setActionMessage(friendlyError(response && response.error ? response.error : "Save failed"), "bad");
       throw new Error(response && response.error ? response.error : "Save failed");
     }
@@ -397,6 +434,29 @@
     }
   }
 
+  async function resetSyncJob() {
+    const resetBtn = element("resetSync");
+    setButtonState(resetBtn, "Clearing...", "busy");
+    setActionMessage("Clearing stuck sync state...", "");
+    try {
+      const response = await send("quietmarks:reset-sync-job", null, POPUP_SAVE_TIMEOUT_MS);
+      if (!response || response.ok === false) {
+        throw new Error(response && response.error ? response.error : "Could not clear stuck sync state.");
+      }
+      setButtonState(resetBtn, "Cleared", "ok");
+      setActionMessage("Stuck sync state cleared. Press Sync now when ready.", "ok");
+      showToast("Sync state cleared", "ok");
+      await refresh();
+      setTimeout(() => setButtonState(resetBtn, resetSyncButtonLabel, "idle"), 1400);
+    } catch (error) {
+      const readableError = friendlyError(error.message || String(error));
+      setButtonState(resetBtn, "Clear failed", "bad");
+      setActionMessage(readableError, "bad");
+      showToast("Clear failed", "bad");
+      setTimeout(() => setButtonState(resetBtn, resetSyncButtonLabel, "idle"), 2000);
+    }
+  }
+
   async function testWebDav() {
     const testBtn = element("testWebdavBtn");
     setButtonState(testBtn, "Testing...", "busy");
@@ -427,6 +487,7 @@
     const syncBtn = element("syncBtn");
     const openOptions = element("openOptions");
     const resetBase = element("resetBase");
+    const resetSync = element("resetSync");
     const enabled = element("enabled");
     const saveBtn = element("saveBtn");
     const testWebdavBtn = element("testWebdavBtn");
@@ -434,10 +495,11 @@
     if (saveBtn) savedButtonLabel = saveBtn.textContent;
     if (syncBtn) syncButtonLabel = syncBtn.textContent;
     if (testWebdavBtn) testWebdavButtonLabel = testWebdavBtn.textContent;
+    if (resetSync) resetSyncButtonLabel = resetSync.textContent;
 
     refresh()
       .then((response) => {
-        const running = response && response.config && ((response.sync && response.sync.inFlight) || response.config.lastSyncStatus === "Syncing");
+        const running = response && response.config && isSyncRunning(response.config, response.sync);
         if (running) followActiveSync();
       })
       .catch((error) => setStatus("Error", error.message));
@@ -453,14 +515,21 @@
 
     if (enabled) {
       enabled.addEventListener("change", () => {
+        const previousChecked = !enabled.checked;
         updateAutoSyncHint(enabled.checked);
         save()
           .then(() => {
-            const message = enabled.checked ? "Auto sync enabled." : "Auto sync disabled. Manual sync only.";
+            const message = enabled.checked
+              ? "Auto sync enabled. Bookmark changes and interval checks will sync in the background."
+              : "Auto sync disabled. Manual sync only.";
             setActionMessage(message, enabled.checked ? "ok" : "");
             showToast(enabled.checked ? "Auto sync enabled" : "Auto sync disabled", enabled.checked ? "ok" : "");
           })
-          .catch((error) => setStatus("Error", error.message));
+          .catch((error) => {
+            enabled.checked = previousChecked;
+            updateAutoSyncHint(enabled.checked);
+            setStatus("Error", error.message);
+          });
       });
     }
 
@@ -490,6 +559,12 @@
         send("quietmarks:reset-local-base")
           .then(refresh)
           .catch((error) => setStatus("Error", error.message));
+      });
+    }
+
+    if (resetSync) {
+      resetSync.addEventListener("click", () => {
+        resetSyncJob();
       });
     }
   });
