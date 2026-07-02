@@ -16,6 +16,7 @@
   );
 
   const globalApi = typeof browser !== "undefined" ? browser : chrome;
+  const OFFSCREEN_DOCUMENT_PATH = "src/offscreen.html";
   const {
     CHANGE_DEBOUNCE_MS,
     SYNC_ALARM
@@ -23,6 +24,7 @@
 
   let applyDepth = 0;
   let debounceTimer = null;
+  let creatingOffscreen = null;
 
   const extensionApi = new QuietMarks.ExtensionApi(globalApi);
   const stateStore = new QuietMarks.SyncStateStore(extensionApi);
@@ -34,11 +36,71 @@
       applyDepth -= 1;
     }
   });
+
+  async function hasOffscreenDocument() {
+    if (!globalApi.offscreen || !globalApi.runtime || !globalApi.runtime.getURL) return false;
+    const offscreenUrl = globalApi.runtime.getURL(OFFSCREEN_DOCUMENT_PATH);
+
+    if (globalApi.runtime.getContexts) {
+      const contexts = await globalApi.runtime.getContexts({
+        contextTypes: ["OFFSCREEN_DOCUMENT"],
+        documentUrls: [offscreenUrl]
+      });
+      return contexts.length > 0;
+    }
+
+    if (typeof clients !== "undefined" && clients.matchAll) {
+      const matchedClients = await clients.matchAll();
+      return matchedClients.some((client) => client.url === offscreenUrl);
+    }
+
+    return false;
+  }
+
+  async function ensureOffscreenKeepAlive() {
+    if (!globalApi.offscreen || !globalApi.offscreen.createDocument) return false;
+    if (await hasOffscreenDocument()) return true;
+    if (creatingOffscreen) {
+      await creatingOffscreen;
+      return true;
+    }
+
+    creatingOffscreen = globalApi.offscreen.createDocument({
+      url: OFFSCREEN_DOCUMENT_PATH,
+      reasons: ["WORKERS"],
+      justification: "Keep a user-started bookmark sync alive while WebDAV requests and bookmark writes complete."
+    });
+
+    try {
+      await creatingOffscreen;
+      return true;
+    } catch (error) {
+      const message = error && error.message ? error.message : String(error);
+      if (/Only a single offscreen document|already exists/i.test(message)) return true;
+      return false;
+    } finally {
+      creatingOffscreen = null;
+    }
+  }
+
+  async function closeOffscreenKeepAlive() {
+    if (!globalApi.offscreen || !globalApi.offscreen.closeDocument) return;
+    try {
+      if (await hasOffscreenDocument()) {
+        await globalApi.offscreen.closeDocument();
+      }
+    } catch (_) {
+      // Offscreen keepalive is best-effort; sync results are stored separately.
+    }
+  }
+
   const syncService = new QuietMarks.SyncService({
     stateStore,
     bookmarkAdapter,
     remoteStore: new QuietMarks.WebDavStore(new QuietMarks.CryptoCodec()),
-    mergeEngine: new QuietMarks.MergeEngine()
+    mergeEngine: new QuietMarks.MergeEngine(),
+    onKeepAliveStart: ensureOffscreenKeepAlive,
+    onKeepAliveStop: closeOffscreenKeepAlive
   });
 
   async function resetAlarm() {
@@ -94,6 +156,12 @@
     globalApi.runtime.onMessage.addListener((message, sender, sendResponse) => {
       (async () => {
         if (!message || !message.type) return null;
+
+        if (message.type === "quietmarks:keepalive") {
+          return {
+            ok: true
+          };
+        }
 
         if (message.type === "quietmarks:get") {
           const stored = await stateStore.get();

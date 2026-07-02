@@ -434,11 +434,98 @@ async function testStartReturnsBeforeWebDavFinishes() {
   assert.strictEqual(service.runtimeStatus().inFlight, false);
 }
 
+async function testKeepAliveHooksWrapActiveSync() {
+  const context = createContext();
+  const blankState = context.QuietMarks.StateModel.blankState("local");
+  const config = {
+    enabled: true,
+    webdavUrl: "https://example.com/dav",
+    remoteFile: "QuietMarks/state.json",
+    clientId: "local",
+    intervalMinutes: 10,
+    conflictPolicy: "merge",
+    scope: "all",
+    lastStats: {
+      localNodes: 0,
+      remoteNodes: 0,
+      mergedNodes: 0,
+      conflicts: 0
+    }
+  };
+  const calls = {
+    start: 0,
+    stop: 0
+  };
+  const service = new context.QuietMarks.SyncService({
+    stateStore: {
+      async get() {
+        return {
+          config,
+          baseState: blankState,
+          idToGuid: {},
+          guidToId: {}
+        };
+      },
+      async saveConfig(nextConfig) {
+        return nextConfig;
+      },
+      async saveSnapshot() {}
+    },
+    remoteStore: {
+      async fetchState() {
+        return {
+          state: blankState,
+          etag: "etag",
+          exists: true
+        };
+      },
+      async putState() {
+        return "etag2";
+      }
+    },
+    bookmarkAdapter: {
+      async scanLocal() {
+        return {
+          state: blankState,
+          idToGuid: {},
+          guidToId: {}
+        };
+      },
+      async applyStateToLocal() {
+        return {
+          idToGuid: {},
+          guidToId: {}
+        };
+      }
+    },
+    mergeEngine: {
+      mergeStates() {
+        return {
+          state: blankState,
+          conflicts: []
+        };
+      }
+    },
+    async onKeepAliveStart() {
+      calls.start += 1;
+    },
+    async onKeepAliveStop() {
+      calls.stop += 1;
+    }
+  });
+
+  const result = await service.run("manual");
+  assert.strictEqual(result.ok, true);
+  assert.strictEqual(calls.start, 1);
+  assert.strictEqual(calls.stop, 1);
+}
+
 async function run() {
   await testApplyFailureDoesNotSaveSnapshotOrRemote();
   await testVerificationFailureDoesNotSaveSnapshotOrRemote();
   await testConcurrentSyncReturnsReadableQueuedError();
   await testStartReturnsBeforeWebDavFinishes();
+  await testKeepAliveHooksWrapActiveSync();
   console.log("sync-service tests passed");
 }
 

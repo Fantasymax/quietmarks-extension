@@ -12,6 +12,8 @@
       this.bookmarkAdapter = deps.bookmarkAdapter;
       this.remoteStore = deps.remoteStore;
       this.mergeEngine = deps.mergeEngine;
+      this.onKeepAliveStart = deps.onKeepAliveStart || (async () => {});
+      this.onKeepAliveStop = deps.onKeepAliveStop || (async () => {});
       this.syncInFlight = false;
       this.pendingSync = false;
       this.activeSync = null;
@@ -173,6 +175,7 @@
         }
 
         currentConfig = this.validateSyncConfig(currentConfig);
+        await this.onKeepAliveStart().catch(() => {});
         currentConfig = await this.saveProgress(currentConfig, "Fetching WebDAV sync state...");
 
         let remoteBundle = await this.withTimeout(
@@ -275,12 +278,15 @@
           error: error.message || String(error)
         };
       } finally {
+        const shouldRunQueued = this.pendingSync;
         this.syncInFlight = false;
         this.activeSync = null;
-        if (this.pendingSync) {
+        if (shouldRunQueued) {
           setTimeout(() => {
             this.run("queued");
           }, 1000);
+        } else {
+          await this.onKeepAliveStop().catch(() => {});
         }
       }
 

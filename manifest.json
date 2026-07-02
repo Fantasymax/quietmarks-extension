@@ -1,11 +1,12 @@
 {
   "manifest_version": 3,
   "name": "QuietMarks",
-  "version": "0.1.15",
+  "version": "0.1.16",
   "description": "Private automatic bookmark sync with WebDAV, encrypted state, and three-way merge.",
   "permissions": [
     "alarms",
     "bookmarks",
+    "offscreen",
     "storage",
     "unlimitedStorage"
   ],
