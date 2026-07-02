@@ -60,33 +60,113 @@
     }
 
     async saveProgress(config, phase) {
-      return this.saveStatus(config, "Syncing", phase, config.lastStats);
+      const nextConfig = await this.saveStatus(config, "Syncing", phase, config.lastStats);
+      await this.updateJob({
+        status: "running",
+        phase,
+        error: ""
+      });
+      return nextConfig;
     }
 
-    runtimeStatus() {
+    createJob(reason) {
+      const at = nowIso();
       return {
-        inFlight: this.syncInFlight,
-        pending: this.pendingSync,
-        active: this.activeSync
+        id: `sync-${randomId()}`,
+        status: "running",
+        reason: reason || "manual",
+        phase: "Starting sync...",
+        startedAt: at,
+        updatedAt: at,
+        finishedAt: "",
+        error: ""
       };
     }
 
-    start(reason) {
+    async persistJob(job) {
+      if (this.stateStore.saveJob) {
+        await this.stateStore.saveJob(job);
+      }
+    }
+
+    async updateJob(patch) {
+      if (!this.activeSync) return null;
+      const updatedAt = nowIso();
+      const nextJob = {
+        ...this.activeSync,
+        ...patch,
+        updatedAt
+      };
+      if (nextJob.status && nextJob.status !== "running" && !nextJob.finishedAt) {
+        nextJob.finishedAt = updatedAt;
+      }
+      this.activeSync = nextJob;
+      await this.persistJob(nextJob);
+      return nextJob;
+    }
+
+    async beginSync(reason) {
+      this.syncInFlight = true;
+      this.pendingSync = false;
+      this.activeSync = this.createJob(reason);
+      await this.persistJob(this.activeSync);
+      return this.activeSync;
+    }
+
+    runtimeStatus(persistedJob) {
+      const persistedRunning = Boolean(persistedJob && persistedJob.status === "running");
+      return {
+        inFlight: this.syncInFlight || persistedRunning,
+        pending: this.pendingSync,
+        active: this.activeSync || (persistedRunning ? persistedJob : null),
+        recoverable: Boolean(persistedRunning && !this.syncInFlight)
+      };
+    }
+
+    alreadyRunningResponse(persistedJob) {
+      this.pendingSync = true;
+      return {
+        ok: false,
+        queued: true,
+        error: "A sync is already running. Wait for it to finish, then try again.",
+        sync: this.runtimeStatus(persistedJob)
+      };
+    }
+
+    async start(reason) {
       if (this.syncInFlight) {
-        this.pendingSync = true;
-        return {
-          ok: false,
-          queued: true,
-          error: "A sync is already running. Wait for it to finish, then try again.",
-          sync: this.runtimeStatus()
-        };
+        return this.alreadyRunningResponse();
       }
 
-      this.run(reason).catch(() => {});
+      const job = await this.beginSync(reason);
+      this.executeSync(reason, job).catch(() => {});
       return {
         ok: true,
         started: true,
-        sync: this.runtimeStatus()
+        sync: this.runtimeStatus(job)
+      };
+    }
+
+    async resumeIfNeeded(stored) {
+      const config = stored && stored.config ? stored.config : {};
+      const job = stored && stored.syncJob ? stored.syncJob : null;
+      const hasRunningJob = Boolean(job && job.status === "running");
+      const hasLegacySyncingStatus = config.lastSyncStatus === "Syncing" && !hasRunningJob;
+      const oldError = String(config.lastSyncError || "").toLowerCase();
+      const hasLegacyInterruptedError = config.lastSyncStatus === "Error" &&
+        oldError.includes("previous sync") &&
+        oldError.includes("start sync again");
+      if (this.syncInFlight || (!hasRunningJob && !hasLegacySyncingStatus && !hasLegacyInterruptedError)) {
+        return {
+          resumed: false,
+          sync: this.runtimeStatus(job)
+        };
+      }
+
+      const started = await this.start("resume");
+      return {
+        resumed: Boolean(started && started.ok),
+        sync: started.sync || this.runtimeStatus(job)
       };
     }
 
@@ -147,27 +227,25 @@
 
     async run(reason) {
       if (this.syncInFlight) {
-        this.pendingSync = true;
-        return {
-          ok: false,
-          queued: true,
-          error: "A sync is already running. Wait for it to finish, then try again."
-        };
+        return this.alreadyRunningResponse();
       }
 
-      this.syncInFlight = true;
-      this.pendingSync = false;
-      this.activeSync = {
-        reason,
-        startedAt: nowIso()
-      };
+      const job = await this.beginSync(reason);
+      return this.executeSync(reason, job);
+    }
 
+    async executeSync(reason) {
       let currentConfig = null;
       try {
         const stored = await this.stateStore.get();
         currentConfig = stored.config;
 
-        if (!currentConfig.enabled && reason !== "manual") {
+        if (!currentConfig.enabled && reason !== "manual" && reason !== "resume") {
+          await this.updateJob({
+            status: "done",
+            phase: "Skipped because automatic sync is off.",
+            error: ""
+          });
           return {
             ok: false,
             skipped: true
@@ -248,6 +326,11 @@
             };
             currentConfig = await this.saveStatus(currentConfig, "Synced", "", stats);
             await this.stateStore.saveSnapshot(merged.state, appliedMappings.idToGuid, appliedMappings.guidToId);
+            await this.updateJob({
+              status: "done",
+              phase: "Synced",
+              error: ""
+            });
             return {
               ok: true,
               stats
@@ -265,17 +348,23 @@
           }
         }
       } catch (error) {
+        const message = error.message || String(error);
         if (currentConfig) {
-          await this.saveStatus(currentConfig, "Error", error.message || String(error), currentConfig.lastStats);
+          await this.saveStatus(currentConfig, "Error", message, currentConfig.lastStats);
         } else {
           const stored = await this.stateStore.get().catch(() => null);
           if (stored && stored.config) {
-            await this.saveStatus(stored.config, "Error", error.message || String(error), stored.config.lastStats);
+            await this.saveStatus(stored.config, "Error", message, stored.config.lastStats);
           }
         }
+        await this.updateJob({
+          status: "error",
+          phase: "Sync failed",
+          error: message
+        });
         return {
           ok: false,
-          error: error.message || String(error)
+          error: message
         };
       } finally {
         const shouldRunQueued = this.pendingSync;

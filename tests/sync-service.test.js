@@ -418,14 +418,14 @@ async function testStartReturnsBeforeWebDavFinishes() {
     mergeEngine
   });
 
-  const started = service.start("manual");
+  const started = await service.start("manual");
   assert.strictEqual(started.ok, true);
   assert.strictEqual(started.started, true);
   assert.strictEqual(service.runtimeStatus().inFlight, true);
   for (let index = 0; index < 10 && !releaseFetch; index += 1) {
     await new Promise((resolve) => setTimeout(resolve, 0));
   }
-  const queued = service.start("manual");
+  const queued = await service.start("manual");
   assert.strictEqual(queued.ok, false);
   assert.strictEqual(queued.queued, true);
   service.pendingSync = false;
@@ -520,12 +520,224 @@ async function testKeepAliveHooksWrapActiveSync() {
   assert.strictEqual(calls.stop, 1);
 }
 
+async function testPersistedRunningJobCanBeResumed() {
+  const context = createContext();
+  const blankState = context.QuietMarks.StateModel.blankState("local");
+  let config = {
+    enabled: true,
+    webdavUrl: "https://example.com/dav",
+    remoteFile: "QuietMarks/state.json",
+    clientId: "local",
+    intervalMinutes: 10,
+    conflictPolicy: "merge",
+    scope: "all",
+    lastSyncStatus: "Syncing",
+    lastSyncError: "Fetching WebDAV sync state...",
+    lastStats: {
+      localNodes: 0,
+      remoteNodes: 0,
+      mergedNodes: 0,
+      conflicts: 0
+    }
+  };
+  let syncJob = {
+    id: "sync-old",
+    status: "running",
+    reason: "manual",
+    phase: "Fetching WebDAV sync state...",
+    startedAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:01.000Z",
+    finishedAt: "",
+    error: ""
+  };
+  let releaseFetch;
+  const savedJobs = [];
+  const stateStore = {
+    async get() {
+      return {
+        config,
+        baseState: blankState,
+        idToGuid: {},
+        guidToId: {},
+        syncJob
+      };
+    },
+    async saveConfig(nextConfig) {
+      config = nextConfig;
+      return nextConfig;
+    },
+    async saveSnapshot() {},
+    async saveJob(nextJob) {
+      syncJob = nextJob;
+      savedJobs.push(nextJob);
+    }
+  };
+  const service = new context.QuietMarks.SyncService({
+    stateStore,
+    remoteStore: {
+      async fetchState() {
+        await new Promise((resolve) => {
+          releaseFetch = resolve;
+        });
+        return {
+          state: blankState,
+          etag: "etag",
+          exists: true
+        };
+      },
+      async putState() {
+        return "etag2";
+      }
+    },
+    bookmarkAdapter: {
+      async scanLocal() {
+        return {
+          state: blankState,
+          idToGuid: {},
+          guidToId: {}
+        };
+      },
+      async applyStateToLocal() {
+        return {
+          idToGuid: {},
+          guidToId: {}
+        };
+      }
+    },
+    mergeEngine: {
+      mergeStates() {
+        return {
+          state: blankState,
+          conflicts: []
+        };
+      }
+    }
+  });
+
+  const recoverable = service.runtimeStatus(syncJob);
+  assert.strictEqual(recoverable.inFlight, true);
+  assert.strictEqual(recoverable.recoverable, true);
+
+  const recovery = await service.resumeIfNeeded(await stateStore.get());
+  assert.strictEqual(recovery.resumed, true);
+  assert.strictEqual(recovery.sync.inFlight, true);
+  assert.strictEqual(recovery.sync.active.reason, "resume");
+  assert.strictEqual(savedJobs[0].status, "running");
+  assert.strictEqual(savedJobs[0].reason, "resume");
+
+  for (let index = 0; index < 10 && !releaseFetch; index += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  releaseFetch();
+  for (let index = 0; index < 20 && service.runtimeStatus().inFlight; index += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+
+  assert.strictEqual(service.runtimeStatus().inFlight, false);
+  assert.strictEqual(syncJob.status, "done");
+  assert.strictEqual(syncJob.phase, "Synced");
+  assert.strictEqual(config.lastSyncStatus, "Synced");
+}
+
+async function testLegacyInterruptedErrorAutoResumes() {
+  const context = createContext();
+  const blankState = context.QuietMarks.StateModel.blankState("local");
+  let config = {
+    enabled: true,
+    webdavUrl: "https://example.com/dav",
+    remoteFile: "QuietMarks/state.json",
+    clientId: "local",
+    intervalMinutes: 10,
+    conflictPolicy: "merge",
+    scope: "all",
+    lastSyncStatus: "Error",
+    lastSyncError: "Previous sync was interrupted. Start sync again.",
+    lastStats: {
+      localNodes: 0,
+      remoteNodes: 0,
+      mergedNodes: 0,
+      conflicts: 0
+    }
+  };
+  let syncJob = null;
+  const stateStore = {
+    async get() {
+      return {
+        config,
+        baseState: blankState,
+        idToGuid: {},
+        guidToId: {},
+        syncJob
+      };
+    },
+    async saveConfig(nextConfig) {
+      config = nextConfig;
+      return nextConfig;
+    },
+    async saveSnapshot() {},
+    async saveJob(nextJob) {
+      syncJob = nextJob;
+    }
+  };
+  const service = new context.QuietMarks.SyncService({
+    stateStore,
+    remoteStore: {
+      async fetchState() {
+        return {
+          state: blankState,
+          etag: "etag",
+          exists: true
+        };
+      },
+      async putState() {
+        return "etag2";
+      }
+    },
+    bookmarkAdapter: {
+      async scanLocal() {
+        return {
+          state: blankState,
+          idToGuid: {},
+          guidToId: {}
+        };
+      },
+      async applyStateToLocal() {
+        return {
+          idToGuid: {},
+          guidToId: {}
+        };
+      }
+    },
+    mergeEngine: {
+      mergeStates() {
+        return {
+          state: blankState,
+          conflicts: []
+        };
+      }
+    }
+  });
+
+  const recovery = await service.resumeIfNeeded(await stateStore.get());
+  assert.strictEqual(recovery.resumed, true);
+  assert.strictEqual(recovery.sync.active.reason, "resume");
+
+  for (let index = 0; index < 20 && service.runtimeStatus().inFlight; index += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+
+  assert.strictEqual(config.lastSyncStatus, "Synced");
+  assert.strictEqual(syncJob.status, "done");
+}
+
 async function run() {
   await testApplyFailureDoesNotSaveSnapshotOrRemote();
   await testVerificationFailureDoesNotSaveSnapshotOrRemote();
   await testConcurrentSyncReturnsReadableQueuedError();
   await testStartReturnsBeforeWebDavFinishes();
   await testKeepAliveHooksWrapActiveSync();
+  await testPersistedRunningJobCanBeResumed();
+  await testLegacyInterruptedErrorAutoResumes();
   console.log("sync-service tests passed");
 }
 

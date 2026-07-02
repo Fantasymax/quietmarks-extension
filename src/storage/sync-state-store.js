@@ -16,7 +16,8 @@
         quietmarksConfig: DEFAULT_CONFIG,
         quietmarksBaseState: null,
         quietmarksIdToGuid: {},
-        quietmarksGuidToId: {}
+        quietmarksGuidToId: {},
+        quietmarksSyncJob: null
       });
       const config = {
         ...DEFAULT_CONFIG,
@@ -32,7 +33,8 @@
         config,
         baseState: normalizeState(stored.quietmarksBaseState, config.clientId),
         idToGuid: stored.quietmarksIdToGuid || {},
-        guidToId: stored.quietmarksGuidToId || {}
+        guidToId: stored.quietmarksGuidToId || {},
+        syncJob: stored.quietmarksSyncJob || null
       };
     }
 
@@ -50,6 +52,12 @@
         quietmarksBaseState: state,
         quietmarksIdToGuid: idToGuid,
         quietmarksGuidToId: guidToId
+      });
+    }
+
+    async saveJob(job) {
+      await this.extensionApi.storageSet({
+        quietmarksSyncJob: job || null
       });
     }
 

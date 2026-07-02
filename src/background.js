@@ -217,21 +217,15 @@
         }
 
         if (message.type === "quietmarks:get") {
-          const stored = await stateStore.get();
-          let config = stored.config;
-          const sync = syncService.runtimeStatus();
-          if (config.lastSyncStatus === "Syncing" && !sync.inFlight) {
-            config = await syncService.saveStatus(
-              config,
-              "Error",
-              "Previous sync was interrupted. Start sync again.",
-              config.lastStats
-            );
+          let stored = await stateStore.get();
+          const recovery = await syncService.resumeIfNeeded(stored);
+          if (recovery.resumed) {
+            stored = await stateStore.get();
           }
           return {
-            config,
+            config: stored.config,
             baseNodeCount: Object.keys(stored.baseState.nodes || {}).length,
-            sync
+            sync: recovery.sync || syncService.runtimeStatus(stored.syncJob)
           };
         }
 
