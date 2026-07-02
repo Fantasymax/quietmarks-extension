@@ -55,6 +55,13 @@
       });
     }
 
+    async saveMappings(idToGuid, guidToId) {
+      await this.extensionApi.storageSet({
+        quietmarksIdToGuid: idToGuid,
+        quietmarksGuidToId: guidToId
+      });
+    }
+
     async saveJob(job) {
       await this.extensionApi.storageSet({
         quietmarksSyncJob: job || null

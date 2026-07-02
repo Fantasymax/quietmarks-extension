@@ -51,13 +51,39 @@
       Boolean(a.deleted) === Boolean(b.deleted);
   }
 
+  function countStateNodes(state) {
+    let total = 0;
+    let active = 0;
+    Object.values((state && state.nodes) || {}).forEach((node) => {
+      if (!node) return;
+      total += 1;
+      if (!node.deleted && node.type !== "root") active += 1;
+    });
+    return {
+      total,
+      active
+    };
+  }
+
+  async function emitScanProgress(options, stage, details) {
+    if (!options || typeof options.onProgress !== "function") return;
+    await options.onProgress({
+      stage,
+      ...(details || {})
+    });
+  }
+
   function makeRemoteIndex(remoteState) {
     const bySignature = new Map();
     const byLooseSignature = new Map();
     const byUrl = new Map();
+    let totalNodes = 0;
+    let activeNodes = 0;
 
     Object.values(remoteState.nodes || {}).forEach((node) => {
+      totalNodes += 1;
       if (!node || node.deleted || node.type === "root") return;
+      activeNodes += 1;
       const signature = node.signature || stateNodeLooseSignature(node);
       const loose = stateNodeLooseSignature(node);
       if (!bySignature.has(signature)) bySignature.set(signature, []);
@@ -75,16 +101,30 @@
       bySignature,
       byLooseSignature,
       byUrl,
-      claimed: new Set()
+      claimed: new Set(),
+      stats: {
+        totalNodes,
+        activeNodes,
+        signatures: bySignature.size,
+        looseSignatures: byLooseSignature.size,
+        urls: byUrl.size
+      }
     };
   }
 
   function takeUnique(map, key, claimed) {
     const values = map.get(key) || [];
-    const available = values.filter((value) => !claimed.has(value));
-    if (available.length === 1) {
-      claimed.add(available[0]);
-      return available[0];
+    let match = "";
+    let available = 0;
+    for (const value of values) {
+      if (claimed.has(value)) continue;
+      available += 1;
+      if (available > 1) return "";
+      match = value;
+    }
+    if (available === 1) {
+      claimed.add(match);
+      return match;
     }
     return "";
   }
@@ -206,9 +246,29 @@
       });
     }
 
-    async scanLocal(config, baseState, remoteState, idToGuid, guidToId) {
+    async scanLocal(config, baseState, remoteState, idToGuid, guidToId, options) {
+      const scanStartedAt = Date.now();
+      const remoteCounts = countStateNodes(remoteState);
+      const baseCounts = countStateNodes(baseState);
+      await emitScanProgress(options, "index-remote", {
+        remoteNodes: remoteCounts.active,
+        remoteTotalNodes: remoteCounts.total,
+        force: true
+      });
+
+      const remoteIndexStartedAt = Date.now();
       const remoteIndex = makeRemoteIndex(remoteState);
+      const remoteIndexMs = Date.now() - remoteIndexStartedAt;
+
+      await emitScanProgress(options, "read-tree", {
+        remoteNodes: remoteIndex.stats.activeNodes,
+        remoteTotalNodes: remoteIndex.stats.totalNodes,
+        force: true
+      });
+
+      const readTreeStartedAt = Date.now();
       const containers = await this.getSyncContainers(config);
+      const readTreeMs = Date.now() - readTreeStartedAt;
       const nodes = {};
       const nextIdToGuid = {
         ...idToGuid
@@ -217,6 +277,14 @@
         ...guidToId
       };
       const observedAt = nowIso();
+      let mappedNodes = 0;
+      let tombstonedNodes = 0;
+      const mapStartedAt = Date.now();
+
+      await emitScanProgress(options, "map-local", {
+        containers: containers.length,
+        force: true
+      });
 
       function remember(id, guid) {
         if (!id || !guid) return;
@@ -266,6 +334,7 @@
           )
         };
         addNode(modelNode);
+        mappedNodes += 1;
 
         if (isFolder(node) && Array.isArray(node.children)) {
           const nextPath = path.concat(normalizeText(node.title || ""));
@@ -290,6 +359,14 @@
         });
       });
 
+      const mapMs = Date.now() - mapStartedAt;
+      const tombstoneStartedAt = Date.now();
+      await emitScanProgress(options, "check-deleted", {
+        mappedNodes,
+        baseNodes: baseCounts.active,
+        force: true
+      });
+
       Object.values(baseState.nodes || {}).forEach((baseNode) => {
         if (!baseNode || baseNode.type === "root") return;
         if (!nodes[baseNode.guid]) {
@@ -299,8 +376,10 @@
             deletedAt: observedAt,
             modifiedAt: observedAt
           };
+          tombstonedNodes += 1;
         }
       });
+      const tombstoneMs = Date.now() - tombstoneStartedAt;
 
       return {
         state: {
@@ -312,7 +391,20 @@
           events: []
         },
         idToGuid: nextIdToGuid,
-        guidToId: nextGuidToId
+        guidToId: nextGuidToId,
+        diagnostics: {
+          scanMs: Date.now() - scanStartedAt,
+          remoteIndexMs,
+          readTreeMs,
+          mapMs,
+          tombstoneMs,
+          remoteNodes: remoteIndex.stats.activeNodes,
+          remoteTotalNodes: remoteIndex.stats.totalNodes,
+          baseNodes: baseCounts.active,
+          mappedNodes,
+          tombstonedNodes,
+          containers: containers.length
+        }
       };
     }
 
@@ -550,6 +642,7 @@
     stateNodeLooseSignature,
     hasSameContent,
     activeNodesByDepth,
-    deletedNodesByDepth
+    deletedNodesByDepth,
+    countStateNodes
   };
 })(globalThis);

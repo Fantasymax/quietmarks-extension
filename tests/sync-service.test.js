@@ -246,6 +246,108 @@ async function testVerificationFailureDoesNotSaveSnapshotOrRemote() {
   assert.strictEqual(calls.savedStatuses.at(-1).status, "Error");
 }
 
+async function testMappingsPersistWhenRemoteWriteFails() {
+  const context = createContext();
+  const blankState = context.QuietMarks.StateModel.blankState("local");
+  const appliedMappings = {
+    idToGuid: {
+      "42": "remote:bookmark"
+    },
+    guidToId: {
+      "remote:bookmark": "42"
+    }
+  };
+  const calls = {
+    saveMappings: 0,
+    saveSnapshot: 0,
+    savedMappings: null
+  };
+  const config = {
+    enabled: true,
+    webdavUrl: "https://example.com/dav",
+    remoteFile: "QuietMarks/state.json",
+    clientId: "local",
+    intervalMinutes: 10,
+    conflictPolicy: "merge",
+    scope: "all",
+    lastStats: {
+      localNodes: 0,
+      remoteNodes: 0,
+      mergedNodes: 0,
+      conflicts: 0
+    }
+  };
+  const stateStore = {
+    async get() {
+      return {
+        config,
+        baseState: blankState,
+        idToGuid: {},
+        guidToId: {}
+      };
+    },
+    async saveConfig(nextConfig) {
+      return nextConfig;
+    },
+    async saveMappings(idToGuid, guidToId) {
+      calls.saveMappings += 1;
+      calls.savedMappings = {
+        idToGuid,
+        guidToId
+      };
+    },
+    async saveSnapshot() {
+      calls.saveSnapshot += 1;
+    }
+  };
+  const service = new context.QuietMarks.SyncService({
+    stateStore,
+    remoteStore: {
+      async fetchState() {
+        return {
+          state: blankState,
+          etag: "etag",
+          exists: true
+        };
+      },
+      async putState() {
+        throw new Error("WebDAV PUT failed 500");
+      }
+    },
+    bookmarkAdapter: {
+      async scanLocal() {
+        return {
+          state: blankState,
+          idToGuid: {},
+          guidToId: {},
+          diagnostics: {
+            scanMs: 1
+          }
+        };
+      },
+      async applyStateToLocal() {
+        return appliedMappings;
+      }
+    },
+    mergeEngine: {
+      mergeStates() {
+        return {
+          state: blankState,
+          conflicts: []
+        };
+      }
+    }
+  });
+
+  const result = await service.run("manual");
+
+  assert.strictEqual(result.ok, false);
+  assert.match(result.error, /PUT failed 500/);
+  assert.strictEqual(calls.saveMappings, 1);
+  assert.deepStrictEqual(calls.savedMappings, appliedMappings);
+  assert.strictEqual(calls.saveSnapshot, 0);
+}
+
 async function testConcurrentSyncReturnsReadableQueuedError() {
   const context = createContext();
   const blankState = context.QuietMarks.StateModel.blankState("local");
@@ -881,6 +983,7 @@ async function testResetSyncJobClearsPersistedRunningState() {
 async function run() {
   await testApplyFailureDoesNotSaveSnapshotOrRemote();
   await testVerificationFailureDoesNotSaveSnapshotOrRemote();
+  await testMappingsPersistWhenRemoteWriteFails();
   await testConcurrentSyncReturnsReadableQueuedError();
   await testStartReturnsBeforeWebDavFinishes();
   await testKeepAliveHooksWrapActiveSync();

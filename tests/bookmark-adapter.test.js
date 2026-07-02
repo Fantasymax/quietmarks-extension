@@ -300,10 +300,49 @@ async function testUnchangedExistingBookmarkIsSkipped() {
   assert.strictEqual(api.calls.move, 0);
 }
 
+async function testScanLocalReportsProgressAndDiagnostics() {
+  const context = createContext();
+  const api = new FakeExtensionApi();
+  await api.createBookmark({
+    parentId: "1",
+    title: "Example",
+    url: "https://example.com/"
+  });
+  api.nodes["0"].children[0] = api.nodes["1"];
+  api.nodes["0"].children[1] = api.nodes["2"];
+  const adapter = new context.QuietMarks.BookmarkAdapter(api);
+  const blankState = context.QuietMarks.StateModel.blankState("local");
+  const progress = [];
+
+  const result = await adapter.scanLocal(
+    {
+      scope: "all",
+      clientId: "local"
+    },
+    blankState,
+    blankState,
+    {},
+    {},
+    {
+      onProgress(details) {
+        progress.push(details.stage);
+      }
+    }
+  );
+
+  assert.deepStrictEqual(progress, ["index-remote", "read-tree", "map-local", "check-deleted"]);
+  assert(result.diagnostics.scanMs >= 0);
+  assert.strictEqual(result.diagnostics.containers, 2);
+  assert.strictEqual(result.diagnostics.mappedNodes, 1);
+  assert.strictEqual(result.diagnostics.remoteTotalNodes, 0);
+  assert(result.state.nodes["root:toolbar"]);
+}
+
 async function run() {
   await testStaleMappingRecreatesBookmark();
   await testOutOfBoundsIndexFallsBackToParentEnd();
   await testUnchangedExistingBookmarkIsSkipped();
+  await testScanLocalReportsProgressAndDiagnostics();
   console.log("bookmark-adapter tests passed");
 }
 

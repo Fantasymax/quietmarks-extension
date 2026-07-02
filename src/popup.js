@@ -211,6 +211,13 @@
     updateAutoSyncHint(Boolean(config.enabled));
   }
 
+  function formatMs(ms) {
+    const value = Number(ms || 0);
+    if (!value) return "";
+    if (value < 1000) return `${value}ms`;
+    return `${(value / 1000).toFixed(value < 10000 ? 1 : 0)}s`;
+  }
+
   function writeStats(config, baseNodeCount) {
     const stats = config.lastStats || {};
     const lastStats = element("lastStats");
@@ -227,7 +234,21 @@
       const applied = Number(stats.appliedNodes || 0);
       const missing = Number(stats.missingAfterApply || 0);
       const conflicts = Number(stats.conflicts || 0);
-      lastStats.textContent = `Local ${local}, cloud ${cloud}, merged ${merged}, applied ${applied}, missing ${missing}, conflicts ${conflicts}`;
+      const timing = [
+        ["GET", stats.webdavGetMs],
+        ["scan", stats.scanMs],
+        ["apply", stats.applyMs],
+        ["verify", stats.verifyScanMs],
+        ["PUT", stats.webdavPutMs]
+      ]
+        .map(([label, value]) => {
+          const formatted = formatMs(value);
+          return formatted ? `${label} ${formatted}` : "";
+        })
+        .filter(Boolean);
+      const remoteTotal = Number(stats.remoteTotalNodes || 0);
+      const remoteHint = remoteTotal && remoteTotal !== cloud ? `, cloud total ${remoteTotal}` : "";
+      lastStats.textContent = `Local ${local}, cloud ${cloud}${remoteHint}, merged ${merged}, applied ${applied}, missing ${missing}, conflicts ${conflicts}${timing.length ? ` | ${timing.join(", ")}` : ""}`;
     }
     if (meta && config.lastSyncAt && !config.lastSyncError) {
       meta.textContent = `Last sync ${new Date(config.lastSyncAt).toLocaleString()}`;

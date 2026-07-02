@@ -37,7 +37,19 @@
         mergedNodes: 0,
         appliedNodes: 0,
         missingAfterApply: 0,
-        conflicts: 0
+        conflicts: 0,
+        webdavGetMs: 0,
+        scanMs: 0,
+        scanRemoteIndexMs: 0,
+        scanReadTreeMs: 0,
+        scanMapMs: 0,
+        scanTombstoneMs: 0,
+        verifyScanMs: 0,
+        applyMs: 0,
+        webdavPutMs: 0,
+        remoteTotalNodes: 0,
+        mappedNodes: 0,
+        tombstonedNodes: 0
       }
     }
   };
