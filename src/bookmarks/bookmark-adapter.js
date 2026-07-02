@@ -443,9 +443,10 @@
       }
     }
 
-    async applyStateToLocal(config, state, guidToId, idToGuid) {
+    async applyStateToLocal(config, state, guidToId, idToGuid, currentState) {
       if (this.hooks.onApplyStart) this.hooks.onApplyStart();
       try {
+        const currentNodes = currentState && currentState.nodes ? currentState.nodes : {};
         const rootIdMap = await this.getRootIdMap(config);
         const nextGuidToId = {
           ...guidToId,
@@ -479,7 +480,7 @@
               parentId,
               title: node.title || "Untitled"
             }, nextGuidToId, nextIdToGuid);
-          } else {
+          } else if (!hasSameContent(currentNodes[node.guid], node)) {
             const updated = await this.updateOrForget(node, id, {
               title: node.title || "Untitled"
             }, nextGuidToId, nextIdToGuid);
@@ -489,6 +490,8 @@
                 title: node.title || "Untitled"
               }, nextGuidToId, nextIdToGuid);
             }
+          } else {
+            continue;
           }
 
           await this.moveOrThrow(node, id, {
@@ -508,7 +511,7 @@
               title: node.title || node.url || "Untitled",
               url: node.url
             }, nextGuidToId, nextIdToGuid);
-          } else {
+          } else if (!hasSameContent(currentNodes[node.guid], node)) {
             const updated = await this.updateOrForget(node, id, {
               title: node.title || node.url || "Untitled",
               url: node.url
@@ -520,6 +523,8 @@
                 url: node.url
               }, nextGuidToId, nextIdToGuid);
             }
+          } else {
+            continue;
           }
 
           await this.moveOrThrow(node, id, {

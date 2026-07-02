@@ -38,6 +38,11 @@ function createContext() {
 class FakeExtensionApi {
   constructor() {
     this.nextId = 10;
+    this.calls = {
+      create: 0,
+      update: 0,
+      move: 0
+    };
     this.nodes = {
       "0": {
         id: "0",
@@ -77,6 +82,7 @@ class FakeExtensionApi {
   }
 
   async createBookmark(payload) {
+    this.calls.create += 1;
     const parent = this.nodes[payload.parentId];
     if (!parent) throw new Error(`Parent ${payload.parentId} not found`);
     const index = payload.index == null ? parent.children.length : payload.index;
@@ -96,6 +102,7 @@ class FakeExtensionApi {
   }
 
   async updateBookmark(id, changes) {
+    this.calls.update += 1;
     const node = this.nodes[id];
     if (!node) throw new Error(`Bookmark ${id} not found`);
     Object.assign(node, changes);
@@ -103,6 +110,7 @@ class FakeExtensionApi {
   }
 
   async moveBookmark(id, destination) {
+    this.calls.move += 1;
     const node = this.nodes[id];
     const parent = this.nodes[destination.parentId];
     if (!node) throw new Error(`Bookmark ${id} not found`);
@@ -230,9 +238,72 @@ async function testOutOfBoundsIndexFallsBackToParentEnd() {
   assert.strictEqual(result.idToGuid[result.guidToId["remote:folder"]], "remote:folder");
 }
 
+async function testUnchangedExistingBookmarkIsSkipped() {
+  const context = createContext();
+  const api = new FakeExtensionApi();
+  const existing = await api.createBookmark({
+    parentId: "1",
+    title: "Already synced",
+    url: "https://example.com/"
+  });
+  api.calls.create = 0;
+  api.calls.update = 0;
+  api.calls.move = 0;
+
+  const adapter = new context.QuietMarks.BookmarkAdapter(api);
+  const state = {
+    version: 1,
+    updatedAt: "2026-06-30T00:00:00.000Z",
+    lastWriter: "remote",
+    roots: ["root:toolbar"],
+    events: [],
+    nodes: {
+      "root:toolbar": {
+        guid: "root:toolbar",
+        type: "root",
+        title: "Bookmarks bar",
+        parentGuid: "",
+        index: 0,
+        deleted: false
+      },
+      "remote:bookmark": {
+        guid: "remote:bookmark",
+        type: "bookmark",
+        title: "Already synced",
+        url: "https://example.com/",
+        parentGuid: "root:toolbar",
+        index: 0,
+        deleted: false
+      }
+    }
+  };
+
+  await adapter.applyStateToLocal(
+    {
+      scope: "all",
+      clientId: "local"
+    },
+    state,
+    {
+      "root:toolbar": "1",
+      "remote:bookmark": existing.id
+    },
+    {
+      "1": "root:toolbar",
+      [existing.id]: "remote:bookmark"
+    },
+    state
+  );
+
+  assert.strictEqual(api.calls.create, 0);
+  assert.strictEqual(api.calls.update, 0);
+  assert.strictEqual(api.calls.move, 0);
+}
+
 async function run() {
   await testStaleMappingRecreatesBookmark();
   await testOutOfBoundsIndexFallsBackToParentEnd();
+  await testUnchangedExistingBookmarkIsSkipped();
   console.log("bookmark-adapter tests passed");
 }
 

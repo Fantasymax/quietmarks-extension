@@ -97,9 +97,20 @@
 
         if (message.type === "quietmarks:get") {
           const stored = await stateStore.get();
+          let config = stored.config;
+          const sync = syncService.runtimeStatus();
+          if (config.lastSyncStatus === "Syncing" && !sync.inFlight) {
+            config = await syncService.saveStatus(
+              config,
+              "Error",
+              "Previous sync was interrupted. Start sync again.",
+              config.lastStats
+            );
+          }
           return {
-            config: stored.config,
-            baseNodeCount: Object.keys(stored.baseState.nodes || {}).length
+            config,
+            baseNodeCount: Object.keys(stored.baseState.nodes || {}).length,
+            sync
           };
         }
 

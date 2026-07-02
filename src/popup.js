@@ -24,6 +24,7 @@
   let savedButtonLabel = "Save";
   let syncButtonLabel = "Sync now";
   let testWebdavButtonLabel = "Test WebDAV";
+  let followTimer = null;
 
   function send(type, payload, timeoutMs) {
     return new Promise((resolve, reject) => {
@@ -154,6 +155,17 @@
     document.body.classList.toggle("sync-ok", status === "Synced");
   }
 
+  function renderSyncControls(config, sync) {
+    const syncBtn = element("syncBtn");
+    const isRunning = Boolean((sync && sync.inFlight) || config.lastSyncStatus === "Syncing");
+    if (isRunning) {
+      setButtonState(syncBtn, "Syncing...", "busy");
+      setActionMessage(config.lastSyncError || "Sync is running in the background...", "");
+    } else if (syncBtn && syncBtn.dataset.state === "busy") {
+      setButtonState(syncBtn, syncButtonLabel, "idle");
+    }
+  }
+
   function sleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
@@ -204,18 +216,41 @@
     }
   }
 
-  async function refresh() {
-    const response = await send("quietmarks:get");
-    if (!response || !response.config) return;
+  function renderState(response) {
+    if (!response || !response.config) return response;
     writeForm(response.config);
     setStatus(response.config.lastSyncStatus, response.config.lastSyncError);
     setPanelStatus(response.config.lastSyncStatus);
     writeStats(response.config, response.baseNodeCount);
+    renderSyncControls(response.config, response.sync);
     if (response.config.lastSyncStatus === "Error" && response.config.lastSyncError) {
       setActionMessage(friendlyError(response.config.lastSyncError), "bad");
     } else if (response.config.lastSyncStatus === "Syncing" && response.config.lastSyncError) {
       setActionMessage(response.config.lastSyncError, "");
     }
+    return response;
+  }
+
+  async function refresh() {
+    const response = await send("quietmarks:get");
+    return renderState(response);
+  }
+
+  function followActiveSync() {
+    if (followTimer) return;
+    followTimer = setInterval(async () => {
+      try {
+        const response = await send("quietmarks:get", null, POPUP_POLL_TIMEOUT_MS);
+        renderState(response);
+        const running = response && response.config && ((response.sync && response.sync.inFlight) || response.config.lastSyncStatus === "Syncing");
+        if (!running) {
+          clearInterval(followTimer);
+          followTimer = null;
+        }
+      } catch (_) {
+        // Keep the popup responsive even if the service worker is briefly waking up.
+      }
+    }, 1200);
   }
 
   async function waitForSync(syncPromise, timeoutMs) {
@@ -253,10 +288,8 @@
       }
 
       if (!response || !response.config) continue;
+      renderState(response);
       lastConfig = response.config;
-      setStatus(lastConfig.lastSyncStatus, lastConfig.lastSyncError);
-      setPanelStatus(lastConfig.lastSyncStatus);
-      writeStats(lastConfig, response.baseNodeCount);
 
       if (lastConfig.lastSyncStatus === "Syncing") {
         sawActiveSync = true;
@@ -324,6 +357,12 @@
       );
       if (!response || response.ok === false) {
         const error = response && response.error ? response.error : "Sync failed";
+        if (/already running/i.test(error)) {
+          followActiveSync();
+          setButtonState(syncBtn, "Syncing...", "busy");
+          setActionMessage("Sync is already running. Reconnected to the current task.", "");
+          return;
+        }
         const readableError = friendlyError(error);
         setStatus("Error", readableError);
         setPanelStatus("Error");
@@ -386,7 +425,12 @@
     if (syncBtn) syncButtonLabel = syncBtn.textContent;
     if (testWebdavBtn) testWebdavButtonLabel = testWebdavBtn.textContent;
 
-    refresh().catch((error) => setStatus("Error", error.message));
+    refresh()
+      .then((response) => {
+        const running = response && response.config && ((response.sync && response.sync.inFlight) || response.config.lastSyncStatus === "Syncing");
+        if (running) followActiveSync();
+      })
+      .catch((error) => setStatus("Error", error.message));
 
     if (form) {
       form.addEventListener("submit", (event) => {

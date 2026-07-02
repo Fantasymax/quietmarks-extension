@@ -326,6 +326,10 @@ async function testConcurrentSyncReturnsReadableQueuedError() {
 
   const firstRun = service.run("manual");
   await new Promise((resolve) => setTimeout(resolve, 0));
+  const running = service.runtimeStatus();
+  assert.strictEqual(running.inFlight, true);
+  assert(running.active.startedAt);
+  assert.strictEqual(running.active.reason, "manual");
   const queued = await service.run("manual");
   assert.strictEqual(queued.ok, false);
   assert.strictEqual(queued.queued, true);
@@ -333,6 +337,7 @@ async function testConcurrentSyncReturnsReadableQueuedError() {
   service.pendingSync = false;
   releaseFetch();
   await firstRun;
+  assert.strictEqual(service.runtimeStatus().inFlight, false);
 }
 
 async function run() {

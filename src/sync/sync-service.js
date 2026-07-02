@@ -14,6 +14,7 @@
       this.mergeEngine = deps.mergeEngine;
       this.syncInFlight = false;
       this.pendingSync = false;
+      this.activeSync = null;
     }
 
     validateConfig(config) {
@@ -58,6 +59,14 @@
 
     async saveProgress(config, phase) {
       return this.saveStatus(config, "Syncing", phase, config.lastStats);
+    }
+
+    runtimeStatus() {
+      return {
+        inFlight: this.syncInFlight,
+        pending: this.pendingSync,
+        active: this.activeSync
+      };
     }
 
     async saveConfigPatch(patch) {
@@ -127,6 +136,10 @@
 
       this.syncInFlight = true;
       this.pendingSync = false;
+      this.activeSync = {
+        reason,
+        startedAt: nowIso()
+      };
 
       let currentConfig = null;
       try {
@@ -176,7 +189,8 @@
               currentConfig,
               merged.state,
               scanned.guidToId,
-              scanned.idToGuid
+              scanned.idToGuid,
+              scanned.state
             ),
             "Applying merged bookmarks",
             SYNC_PHASE_TIMEOUT_MS
@@ -238,6 +252,7 @@
         };
       } finally {
         this.syncInFlight = false;
+        this.activeSync = null;
         if (this.pendingSync) {
           setTimeout(() => {
             this.run("queued");
