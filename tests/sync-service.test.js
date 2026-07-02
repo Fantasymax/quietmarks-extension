@@ -340,10 +340,105 @@ async function testConcurrentSyncReturnsReadableQueuedError() {
   assert.strictEqual(service.runtimeStatus().inFlight, false);
 }
 
+async function testStartReturnsBeforeWebDavFinishes() {
+  const context = createContext();
+  const blankState = context.QuietMarks.StateModel.blankState("local");
+  const config = {
+    enabled: true,
+    webdavUrl: "https://example.com/dav",
+    remoteFile: "QuietMarks/state.json",
+    clientId: "local",
+    intervalMinutes: 10,
+    conflictPolicy: "merge",
+    scope: "all",
+    lastStats: {
+      localNodes: 0,
+      remoteNodes: 0,
+      mergedNodes: 0,
+      conflicts: 0
+    }
+  };
+  let releaseFetch;
+  const stateStore = {
+    async get() {
+      return {
+        config,
+        baseState: blankState,
+        idToGuid: {},
+        guidToId: {}
+      };
+    },
+    async saveConfig(nextConfig) {
+      return nextConfig;
+    },
+    async saveSnapshot() {}
+  };
+  const remoteStore = {
+    async fetchState() {
+      await new Promise((resolve) => {
+        releaseFetch = resolve;
+      });
+      return {
+        state: blankState,
+        etag: "etag",
+        exists: true
+      };
+    },
+    async putState() {
+      return "etag2";
+    }
+  };
+  const bookmarkAdapter = {
+    async scanLocal() {
+      return {
+        state: blankState,
+        idToGuid: {},
+        guidToId: {}
+      };
+    },
+    async applyStateToLocal() {
+      return {
+        idToGuid: {},
+        guidToId: {}
+      };
+    }
+  };
+  const mergeEngine = {
+    mergeStates() {
+      return {
+        state: blankState,
+        conflicts: []
+      };
+    }
+  };
+  const service = new context.QuietMarks.SyncService({
+    stateStore,
+    remoteStore,
+    bookmarkAdapter,
+    mergeEngine
+  });
+
+  const started = service.start("manual");
+  assert.strictEqual(started.ok, true);
+  assert.strictEqual(started.started, true);
+  assert.strictEqual(service.runtimeStatus().inFlight, true);
+  for (let index = 0; index < 10 && !releaseFetch; index += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  const queued = service.start("manual");
+  assert.strictEqual(queued.ok, false);
+  assert.strictEqual(queued.queued, true);
+  service.pendingSync = false;
+  releaseFetch();
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.strictEqual(service.runtimeStatus().inFlight, false);
+}
+
 async function run() {
   await testApplyFailureDoesNotSaveSnapshotOrRemote();
   await testVerificationFailureDoesNotSaveSnapshotOrRemote();
   await testConcurrentSyncReturnsReadableQueuedError();
+  await testStartReturnsBeforeWebDavFinishes();
   console.log("sync-service tests passed");
 }
 

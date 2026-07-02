@@ -84,8 +84,30 @@ async function testPutStateWritesCompactJson() {
   assert(!requests[0].options.body.includes("\n"), "PUT body should be compact JSON");
 }
 
+async function testHardTimeoutRejectsUnsettledWork() {
+  const context = createContext(async () => new Promise(() => {}));
+  const store = new context.QuietMarks.WebDavStore({
+    async encryptState(state) {
+      return state;
+    }
+  });
+
+  await assert.rejects(
+    () => store.fetchWithTimeout("https://example.com/state.json", {
+      method: "GET"
+    }, "GET", 10),
+    /WebDAV GET timed out/
+  );
+
+  await assert.rejects(
+    () => store.withTimeout(new Promise(() => {}), "GET body", 10),
+    /WebDAV GET body timed out/
+  );
+}
+
 async function run() {
   await testPutStateWritesCompactJson();
+  await testHardTimeoutRejectsUnsettledWork();
   console.log("webdav-store tests passed");
 }
 

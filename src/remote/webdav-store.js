@@ -24,17 +24,19 @@
       });
     }
 
-    async fetchWithTimeout(url, options, label, timeoutMs) {
+    async withTimeout(promise, label, timeoutMs, controller) {
       const timeout = timeoutMs || WEBDAV_TIMEOUT_MS;
-      const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
-      const timeoutId = controller
-        ? setTimeout(() => controller.abort(), timeout)
-        : null;
+      let timeoutId = null;
       try {
-        return await fetch(url, {
-          ...(options || {}),
-          signal: controller ? controller.signal : undefined
-        });
+        return await Promise.race([
+          promise,
+          new Promise((_, reject) => {
+            timeoutId = setTimeout(() => {
+              if (controller) controller.abort();
+              reject(new Error(`WebDAV ${label} timed out after ${Math.round(timeout / 1000)} seconds.`));
+            }, timeout);
+          })
+        ]);
       } catch (error) {
         if (error && error.name === "AbortError") {
           throw new Error(`WebDAV ${label} timed out after ${Math.round(timeout / 1000)} seconds.`);
@@ -43,6 +45,20 @@
       } finally {
         if (timeoutId) clearTimeout(timeoutId);
       }
+    }
+
+    async fetchWithTimeout(url, options, label, timeoutMs) {
+      const timeout = timeoutMs || WEBDAV_TIMEOUT_MS;
+      const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
+      return this.withTimeout(
+        fetch(url, {
+          ...(options || {}),
+          signal: controller ? controller.signal : undefined
+        }),
+        label,
+        timeout,
+        controller
+      );
     }
 
     remoteBaseUrl(config) {
@@ -197,7 +213,7 @@
       }
 
       const etag = response.headers.get("ETag");
-      const envelope = await response.json();
+      const envelope = await this.withTimeout(response.json(), "GET body", WEBDAV_TIMEOUT_MS);
       return {
         state: normalizeState(await this.cryptoCodec.decryptState(envelope, config.passphrase), config.clientId),
         etag,

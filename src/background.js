@@ -124,7 +124,7 @@
         }
 
         if (message.type === "quietmarks:sync-now") {
-          return syncService.run("manual");
+          return syncService.start("manual");
         }
 
         if (message.type === "quietmarks:test-webdav") {

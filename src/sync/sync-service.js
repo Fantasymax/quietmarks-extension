@@ -69,6 +69,25 @@
       };
     }
 
+    start(reason) {
+      if (this.syncInFlight) {
+        this.pendingSync = true;
+        return {
+          ok: false,
+          queued: true,
+          error: "A sync is already running. Wait for it to finish, then try again.",
+          sync: this.runtimeStatus()
+        };
+      }
+
+      this.run(reason).catch(() => {});
+      return {
+        ok: true,
+        started: true,
+        sync: this.runtimeStatus()
+      };
+    }
+
     async saveConfigPatch(patch) {
       const stored = await this.stateStore.get();
       const nextConfig = this.validateConfig({
@@ -245,6 +264,11 @@
       } catch (error) {
         if (currentConfig) {
           await this.saveStatus(currentConfig, "Error", error.message || String(error), currentConfig.lastStats);
+        } else {
+          const stored = await this.stateStore.get().catch(() => null);
+          if (stored && stored.config) {
+            await this.saveStatus(stored.config, "Error", error.message || String(error), stored.config.lastStats);
+          }
         }
         return {
           ok: false,

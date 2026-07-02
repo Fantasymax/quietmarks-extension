@@ -253,10 +253,11 @@
     }, 1200);
   }
 
-  async function waitForSync(syncPromise, timeoutMs) {
+  async function waitForSyncStart(syncPromise, timeoutMs) {
     const startedAt = Date.now();
     let lastConfig = null;
     let sawActiveSync = false;
+    let startSettled = false;
     const wrappedSync = syncPromise.then(
       (response) => ({
         done: true,
@@ -269,15 +270,23 @@
     );
 
     while (Date.now() - startedAt < timeoutMs) {
-      const syncResult = await Promise.race([
-        wrappedSync,
-        sleep(1200).then(() => ({
+      const syncResult = startSettled
+        ? await sleep(1200).then(() => ({
           done: false
         }))
-      ]);
+        : await Promise.race([
+          wrappedSync,
+          sleep(1200).then(() => ({
+            done: false
+          }))
+        ]);
       if (syncResult.done) {
         if (syncResult.error) throw syncResult.error;
-        return syncResult.response;
+        if (!syncResult.response || syncResult.response.ok === false) {
+          return syncResult.response;
+        }
+        startSettled = true;
+        sawActiveSync = true;
       }
 
       let response = null;
@@ -290,14 +299,15 @@
       if (!response || !response.config) continue;
       renderState(response);
       lastConfig = response.config;
+      const running = Boolean((response.sync && response.sync.inFlight) || lastConfig.lastSyncStatus === "Syncing");
 
-      if (lastConfig.lastSyncStatus === "Syncing") {
+      if (running) {
         sawActiveSync = true;
         setActionMessage(lastConfig.lastSyncError || "Syncing bookmarks...", "");
         continue;
       }
 
-      if (sawActiveSync && (lastConfig.lastSyncStatus === "Synced" || lastConfig.lastSyncStatus === "Error")) {
+      if (sawActiveSync && !running && (lastConfig.lastSyncStatus === "Synced" || lastConfig.lastSyncStatus === "Error")) {
         return {
           ok: lastConfig.lastSyncStatus === "Synced",
           error: lastConfig.lastSyncStatus === "Error" ? lastConfig.lastSyncError : "",
@@ -351,8 +361,8 @@
         silent: true,
         keepStatus: true
       });
-      const response = await waitForSync(
-        send("quietmarks:sync-now", null, POPUP_SYNC_TIMEOUT_MS),
+      const response = await waitForSyncStart(
+        send("quietmarks:sync-now", null, POPUP_POLL_TIMEOUT_MS),
         POPUP_SYNC_TIMEOUT_MS
       );
       if (!response || response.ok === false) {
