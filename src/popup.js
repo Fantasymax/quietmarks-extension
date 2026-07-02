@@ -157,6 +157,28 @@
     document.body.classList.toggle("sync-ok", status === "Synced");
   }
 
+  function setBackgroundHealth(config, sync) {
+    const health = element("backgroundHealth");
+    const text = element("backgroundHealthText");
+    if (!health || !text) return;
+
+    let mode = "idle";
+    let label = "Background idle (normal)";
+    if (sync && sync.inFlight) {
+      mode = "active";
+      label = "Background active";
+    } else if (sync && sync.recoverable) {
+      mode = "warn";
+      label = "Background recovering";
+    } else if (config && config.lastSyncStatus === "Error") {
+      mode = "warn";
+      label = "Background needs attention";
+    }
+
+    health.className = `background-health ${mode}`;
+    text.textContent = label;
+  }
+
   function isSyncRunning(config, sync) {
     return Boolean(sync && sync.inFlight);
   }
@@ -261,6 +283,7 @@
     writeForm(response.config);
     setStatus(visibleConfig.lastSyncStatus, visibleConfig.lastSyncError);
     setPanelStatus(visibleConfig.lastSyncStatus);
+    setBackgroundHealth(visibleConfig, response.sync);
     writeStats(response.config, response.baseNodeCount);
     renderSyncControls(visibleConfig, response.sync);
     if (visibleConfig.lastSyncStatus === "Error" && visibleConfig.lastSyncError) {

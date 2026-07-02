@@ -308,6 +308,58 @@ h1 {
   line-height: 1.45;
 }
 
+.background-health {
+  min-height: 28px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  border: 1px solid rgba(246, 241, 231, 0.11);
+  border-radius: 999px;
+  background: rgba(13, 16, 14, 0.58);
+  padding: 0 10px;
+  color: var(--muted);
+}
+
+.background-health strong {
+  font-size: 11px;
+  font-weight: 830;
+  text-transform: uppercase;
+}
+
+.background-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--subtle);
+  box-shadow: 0 0 0 4px rgba(112, 122, 118, 0.12);
+}
+
+.background-health.active {
+  border-color: rgba(103, 211, 192, 0.4);
+  color: var(--ink);
+}
+
+.background-health.active .background-dot {
+  background: var(--accent-2);
+  box-shadow: 0 0 0 4px rgba(103, 211, 192, 0.14);
+}
+
+.background-health.warn {
+  border-color: rgba(255, 131, 100, 0.42);
+  color: var(--ink);
+}
+
+.background-health.warn .background-dot {
+  background: var(--danger);
+  box-shadow: 0 0 0 4px rgba(255, 131, 100, 0.14);
+}
+
+.background-health.idle .background-dot {
+  background: var(--ok);
+  box-shadow: 0 0 0 4px rgba(217, 255, 118, 0.11);
+}
+
 .form-grid {
   display: grid;
   gap: 13px;
