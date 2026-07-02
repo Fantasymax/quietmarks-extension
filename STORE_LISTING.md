@@ -4,7 +4,7 @@ Use this draft when creating the Chrome Web Store listing for QuietMarks.
 
 ## Package
 
-- Upload ZIP: `dist/quietmarks-extension-v0.1.16.zip`
+- Upload ZIP: `dist/quietmarks-extension-v0.1.17.zip`
 - Small promotional tile: `dist/store-assets/promo-440x280.png`
 - Screenshot: `dist/store-assets/screenshot-1280x800.png`
 - Privacy policy file in repository: `PRIVACY.md`
@@ -59,7 +59,7 @@ Required to read, create, update, move, and remove browser bookmarks during sync
 
 `offscreen`:
 
-Required to keep a user-started sync alive while Manifest V3 service workers may otherwise be interrupted during WebDAV requests and bookmark writes. The offscreen document does not display UI, access web pages, or collect data; it only sends runtime keepalive messages during an active sync.
+Required to run user-started WebDAV sync requests from a hidden extension document because Manifest V3 service workers can be interrupted during long WebDAV fetches. The offscreen document does not display UI, access web pages, or collect data; it only performs WebDAV requests to the user-configured sync endpoint and sends runtime keepalive messages during an active sync.
 
 `storage`:
 
@@ -114,7 +114,7 @@ The test connection action writes a temporary JSON probe file to the configured 
 
 1. Open the Chrome Web Store Developer Dashboard.
 2. Choose `New item`.
-3. Upload `dist/quietmarks-extension-v0.1.16.zip`.
+3. Upload `dist/quietmarks-extension-v0.1.17.zip`.
 4. Complete Store Listing using the text above.
 5. Upload `dist/store-assets/screenshot-1280x800.png`.
 6. Upload `dist/store-assets/promo-440x280.png` if requested.

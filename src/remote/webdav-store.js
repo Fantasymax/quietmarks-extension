@@ -6,8 +6,9 @@
   const { WEBDAV_TIMEOUT_MS, WEBDAV_PUT_TIMEOUT_MS } = QuietMarks.Constants;
 
   class WebDavStore {
-    constructor(cryptoCodec) {
+    constructor(cryptoCodec, options) {
       this.cryptoCodec = cryptoCodec;
+      this.fetchImpl = options && options.fetchImpl ? options.fetchImpl : fetch;
     }
 
     requestHeaders(config, extras) {
@@ -51,7 +52,7 @@
       const timeout = timeoutMs || WEBDAV_TIMEOUT_MS;
       const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
       return this.withTimeout(
-        fetch(url, {
+        this.fetchImpl(url, {
           ...(options || {}),
           signal: controller ? controller.signal : undefined
         }),

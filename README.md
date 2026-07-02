@@ -23,6 +23,7 @@ The project is an early prototype. Export your bookmarks before using it on an i
 
 ## Changelog
 
+- `0.1.17`: Moves WebDAV network fetches into the offscreen document to avoid Manifest V3 service worker fetch termination.
 - `0.1.16`: Uses an offscreen keepalive during active sync so MV3 service workers are not interrupted while WebDAV requests are running.
 - `0.1.15`: Starts manual sync without holding the popup message channel open and adds hard timeouts for WebDAV fetch/body reads.
 - `0.1.14`: Reconnects reopened popups/options pages to active background sync and skips unchanged bookmark updates for much faster sync.

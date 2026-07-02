@@ -67,8 +67,8 @@
 
     creatingOffscreen = globalApi.offscreen.createDocument({
       url: OFFSCREEN_DOCUMENT_PATH,
-      reasons: ["WORKERS"],
-      justification: "Keep a user-started bookmark sync alive while WebDAV requests and bookmark writes complete."
+      reasons: ["DOM_PARSER"],
+      justification: "Run hidden WebDAV fetch handling so user-started bookmark sync can continue outside the Manifest V3 service worker fetch lifetime limit."
     });
 
     try {
@@ -77,10 +77,61 @@
     } catch (error) {
       const message = error && error.message ? error.message : String(error);
       if (/Only a single offscreen document|already exists/i.test(message)) return true;
-      return false;
+      throw new Error(`Offscreen sync helper failed to start: ${message}`);
     } finally {
       creatingOffscreen = null;
     }
+  }
+
+  function serializeHeaders(headers) {
+    if (!headers) return [];
+    if (typeof headers.entries === "function") return Array.from(headers.entries());
+    return Object.entries(headers);
+  }
+
+  function deserializeResponseHeaders(entries) {
+    const map = new Map();
+    (entries || []).forEach(([name, value]) => {
+      map.set(String(name).toLowerCase(), value);
+    });
+    return {
+      get(name) {
+        return map.get(String(name).toLowerCase()) || null;
+      }
+    };
+  }
+
+  async function offscreenFetch(url, options) {
+    await ensureOffscreenKeepAlive();
+    const response = await globalApi.runtime.sendMessage({
+      type: "quietmarks:offscreen-fetch",
+      request: {
+        url,
+        options: {
+          method: options && options.method,
+          headers: serializeHeaders(options && options.headers),
+          body: options && options.body,
+          cache: options && options.cache
+        }
+      }
+    });
+
+    if (!response || response.ok === false) {
+      throw new Error(response && response.error ? response.error : "Offscreen WebDAV fetch failed.");
+    }
+
+    return {
+      ok: response.fetchOk,
+      status: response.status,
+      headers: deserializeResponseHeaders(response.headers),
+      async text() {
+        return response.body || "";
+      },
+      async json() {
+        const body = response.body || "";
+        return body ? JSON.parse(body) : null;
+      }
+    };
   }
 
   async function closeOffscreenKeepAlive() {
@@ -97,7 +148,9 @@
   const syncService = new QuietMarks.SyncService({
     stateStore,
     bookmarkAdapter,
-    remoteStore: new QuietMarks.WebDavStore(new QuietMarks.CryptoCodec()),
+    remoteStore: new QuietMarks.WebDavStore(new QuietMarks.CryptoCodec(), {
+      fetchImpl: offscreenFetch
+    }),
     mergeEngine: new QuietMarks.MergeEngine(),
     onKeepAliveStart: ensureOffscreenKeepAlive,
     onKeepAliveStop: closeOffscreenKeepAlive

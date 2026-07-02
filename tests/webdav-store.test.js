@@ -105,9 +105,50 @@ async function testHardTimeoutRejectsUnsettledWork() {
   );
 }
 
+async function testCustomFetchImplementationIsUsed() {
+  let called = false;
+  const context = createContext(async () => {
+    throw new Error("global fetch should not be used");
+  });
+  const store = new context.QuietMarks.WebDavStore({
+    async decryptState(state) {
+      return state;
+    }
+  }, {
+    async fetchImpl() {
+      called = true;
+      return {
+        ok: false,
+        status: 404,
+        headers: {
+          get() {
+            return null;
+          }
+        },
+        async json() {
+          return {};
+        }
+      };
+    }
+  });
+
+  const bundle = await store.fetchState({
+    webdavUrl: "https://example.com/dav",
+    remoteFile: "state.json",
+    clientId: "local",
+    username: "",
+    password: "",
+    passphrase: ""
+  });
+
+  assert.strictEqual(called, true);
+  assert.strictEqual(bundle.exists, false);
+}
+
 async function run() {
   await testPutStateWritesCompactJson();
   await testHardTimeoutRejectsUnsettledWork();
+  await testCustomFetchImplementationIsUsed();
   console.log("webdav-store tests passed");
 }
 
