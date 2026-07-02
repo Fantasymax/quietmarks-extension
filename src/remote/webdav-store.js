@@ -3,7 +3,7 @@
 
   const QuietMarks = root.QuietMarks = root.QuietMarks || {};
   const { blankState, normalizeState, cleanRemoteFile } = QuietMarks.StateModel;
-  const { WEBDAV_TIMEOUT_MS } = QuietMarks.Constants;
+  const { WEBDAV_TIMEOUT_MS, WEBDAV_PUT_TIMEOUT_MS } = QuietMarks.Constants;
 
   class WebDavStore {
     constructor(cryptoCodec) {
@@ -24,10 +24,11 @@
       });
     }
 
-    async fetchWithTimeout(url, options, label) {
+    async fetchWithTimeout(url, options, label, timeoutMs) {
+      const timeout = timeoutMs || WEBDAV_TIMEOUT_MS;
       const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
       const timeoutId = controller
-        ? setTimeout(() => controller.abort(), WEBDAV_TIMEOUT_MS)
+        ? setTimeout(() => controller.abort(), timeout)
         : null;
       try {
         return await fetch(url, {
@@ -36,7 +37,7 @@
         });
       } catch (error) {
         if (error && error.name === "AbortError") {
-          throw new Error(`WebDAV ${label} timed out after ${Math.round(WEBDAV_TIMEOUT_MS / 1000)} seconds.`);
+          throw new Error(`WebDAV ${label} timed out after ${Math.round(timeout / 1000)} seconds.`);
         }
         throw error;
       } finally {
@@ -217,8 +218,8 @@
       const response = await this.fetchWithTimeout(this.remoteFileUrl(config), {
         method: "PUT",
         headers,
-        body: JSON.stringify(envelope, null, 2)
-      }, "PUT");
+        body: JSON.stringify(envelope)
+      }, "PUT", WEBDAV_PUT_TIMEOUT_MS);
 
       if ([409, 412].includes(response.status)) {
         const conflict = new Error(`Remote changed during sync (${response.status})`);

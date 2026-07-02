@@ -23,6 +23,7 @@ The project is an early prototype. Export your bookmarks before using it on an i
 
 ## Changelog
 
+- `0.1.13`: Extends WebDAV upload timeouts and writes a compact sync payload for slower WebDAV providers and larger bookmark trees.
 - `0.1.12`: Adds visible sync phase progress, popup polling, hard timeouts around bookmark phases, and faster bookmark placement after out-of-bounds recovery.
 - `0.1.11`: Adds WebDAV request timeouts and clearer messaging when another sync is already running.
 - `0.1.10`: Uses static WebDAV host permissions and restores the sync button state when pre-sync setup fails.

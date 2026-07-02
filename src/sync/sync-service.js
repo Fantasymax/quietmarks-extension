@@ -2,7 +2,7 @@
   "use strict";
 
   const QuietMarks = root.QuietMarks = root.QuietMarks || {};
-  const { DEFAULT_CONFIG, SYNC_PHASE_TIMEOUT_MS, WEBDAV_TIMEOUT_MS } = QuietMarks.Constants;
+  const { DEFAULT_CONFIG, SYNC_PHASE_TIMEOUT_MS, WEBDAV_TIMEOUT_MS, WEBDAV_PUT_TIMEOUT_MS } = QuietMarks.Constants;
   const { nowIso, randomId } = QuietMarks.Utils;
   const { cleanRemoteFile } = QuietMarks.StateModel;
 
@@ -200,7 +200,7 @@
             await this.withTimeout(
               this.remoteStore.putState(currentConfig, merged.state, remoteBundle.etag, remoteBundle.exists),
               "Writing WebDAV sync state",
-              WEBDAV_TIMEOUT_MS + 5000
+              WEBDAV_PUT_TIMEOUT_MS + WEBDAV_TIMEOUT_MS + 10000
             );
             const stats = {
               localNodes: this.activeNodeCount(scanned.state),

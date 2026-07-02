@@ -3,7 +3,7 @@
   "use strict";
 
   const api = typeof browser !== "undefined" ? browser : chrome;
-  const POPUP_SYNC_TIMEOUT_MS = 240000;
+  const POPUP_SYNC_TIMEOUT_MS = 480000;
   const POPUP_WEBDAV_TIMEOUT_MS = 45000;
   const POPUP_POLL_TIMEOUT_MS = 10000;
   const fields = [
